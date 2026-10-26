@@ -6,6 +6,14 @@ export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
+export function getUsername() {
+  return localStorage.getItem(USER_KEY) || ''
+}
+
+export function setUsername(username) {
+  localStorage.setItem(USER_KEY, username)
+}
+
 // Membaca waktu kedaluwarsa (exp) dari payload JWT, tanpa verifikasi (verifikasi dilakukan backend).
 function readExpiry(token) {
   try {

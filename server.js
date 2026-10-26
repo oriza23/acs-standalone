@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const pool = require('./database');
 const requireAuth = require('./backend/middleware/auth');
+const adminsRouter = require('./backend/routes/admins');
 const ensureBootstrapAdmin = require('./backend/bootstrap_admin');
 const { ensureTables: ensureAcsTables } = require('./backend/acs');
 
@@ -19,6 +20,8 @@ app.use(express.json());
 app.use('/api/auth', require('./backend/routes/auth'));
 app.use('/api', requireAuth);
 app.use('/api/acs', require('./backend/routes/acs'));
+app.use('/api/admins', adminsRouter);
+app.use('/api/admin', adminsRouter);
 
 async function start() {
   await ensureBootstrapAdmin(pool);

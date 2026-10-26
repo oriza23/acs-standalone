@@ -1,5 +1,8 @@
+const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { promisify } = require('util');
+
+const BCRYPT_ROUNDS = 12;
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -12,6 +15,21 @@ const SALT_LENGTH = 16;
 
 function isScryptHash(stored) {
   return typeof stored === 'string' && stored.startsWith('scrypt$');
+}
+
+function isBcryptHash(stored) {
+  return typeof stored === 'string' && /^\$2[aby]\$\d{2}\$/.test(stored);
+}
+
+function hashBcrypt(password) {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+function verifyBcrypt(password, stored) {
+  if (!isBcryptHash(stored)) {
+    return Promise.resolve(false);
+  }
+  return bcrypt.compare(password, stored);
 }
 
 async function hashPassword(password) {
@@ -63,4 +81,7 @@ module.exports = {
   hashPassword,
   verifyPassword,
   isScryptHash,
+  hashBcrypt,
+  verifyBcrypt,
+  isBcryptHash,
 };

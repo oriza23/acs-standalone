@@ -241,6 +241,18 @@ sudo ufw status
 
 Port MariaDB `3306` tetap tertutup dari luar. Aplikasi hanya terhubung ke `localhost`.
 
+## Cara Memperbarui Aplikasi (Update)
+
+Saat aplikasi sudah berjalan di server produksi, pembaruan kode dari GitHub dijalankan dengan `update.sh` dari folder utama proyek. Script menarik `origin main`, memasang dependensi backend dan frontend, membangun ulang Vite, lalu me-restart proses PM2 `acs-backend` dan `acs-frontend`.
+
+```bash
+cd /var/www/acs-standalone
+chmod +x update.sh
+./update.sh
+```
+
+`chmod +x` cukup sekali. Pembaruan berikutnya cukup `./update.sh`. Jika script selesai, muncul pesan hijau: Proses Update Selesai dan Berhasil!
+
 ## Cara Mengakses Aplikasi
 
 Cek alamat server dari terminal Ubuntu.

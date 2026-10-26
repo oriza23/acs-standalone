@@ -67,6 +67,9 @@ function Dashboard() {
           <NavLink to="/acs" className={navLinkClass}>
             GenieACS
           </NavLink>
+          <NavLink to="/akun" className={navLinkClass}>
+            Akun Admin
+          </NavLink>
         </nav>
 
         <ThemeToggle />

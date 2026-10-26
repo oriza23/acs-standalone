@@ -3,7 +3,9 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const pool = require('../../database');
 const requireAuth = require('../middleware/auth');
-const { hashPassword, isScryptHash, verifyPassword } = require('../password');
+const {
+  hashBcrypt, isBcryptHash, isScryptHash, verifyBcrypt, verifyPassword,
+} = require('../password');
 const { secret, expiresIn } = require('../config/jwt');
 
 const router = express.Router();
@@ -73,10 +75,13 @@ router.post('/login', async (req, res) => {
     );
     const admin = rows[0];
     const stored = admin?.password;
-    const hashed = isScryptHash(stored);
-    const passwordOk = hashed
-      ? await verifyPassword(password, stored)
-      : Boolean(admin) && sameText(stored, password);
+    const bcryptHash = isBcryptHash(stored);
+    const scryptHash = isScryptHash(stored);
+    const passwordOk = bcryptHash
+      ? await verifyBcrypt(password, stored)
+      : scryptHash
+        ? await verifyPassword(password, stored)
+        : Boolean(admin) && sameText(stored, password);
 
     if (!passwordOk) {
       recordFailure(key);
@@ -86,9 +91,9 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Akun lama yang masih polos: izinkan login ini, lalu simpan ulang sebagai hash.
-    if (!hashed) {
-      const upgraded = await hashPassword(password);
+    // Akun lama yang masih polos: izinkan login ini, lalu simpan ulang sebagai bcrypt.
+    if (!bcryptHash && !scryptHash) {
+      const upgraded = await hashBcrypt(password);
       await pool.execute(
         'UPDATE web_admins SET password = ? WHERE username = ?',
         [upgraded, admin.username],
