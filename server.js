@@ -1,3 +1,6 @@
+const path = require('path');
+require('./backend/load_env')(path.join(__dirname, '.env'));
+
 const express = require('express');
 const cors = require('cors');
 const pool = require('./database');
@@ -6,7 +9,7 @@ const ensureBootstrapAdmin = require('./backend/bootstrap_admin');
 const { ensureTables: ensureAcsTables } = require('./backend/acs');
 
 const app = express();
-const PORT = 5001;
+const PORT = Number(process.env.PORT) || 5001;
 
 // Frontend GenieACS berjalan di port 5174 (localhost maupun IP LAN).
 app.use(cors({ origin: '*' }));
