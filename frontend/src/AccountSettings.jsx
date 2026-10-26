@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Lock, User } from 'lucide-react'
 import Swal from 'sweetalert2'
 import api from './api/axios.js'
@@ -54,6 +54,9 @@ function AccountSettings() {
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' })
   const [createState, setCreateState] = useState({ loading: false, error: '', ok: '' })
   const [passwordState, setPasswordState] = useState({ loading: false, error: '', ok: '' })
+  const [updating, setUpdating] = useState(false)
+  const [updateError, setUpdateError] = useState('')
+  const updateTimer = useRef(null)
 
   const loadAdmins = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -71,6 +74,11 @@ function AccountSettings() {
 
   useEffect(() => {
     loadAdmins()
+    return () => {
+      if (updateTimer.current) {
+        clearInterval(updateTimer.current)
+      }
+    }
   }, [loadAdmins])
 
   async function handleCreate(event) {
@@ -169,6 +177,66 @@ function AccountSettings() {
     } finally {
       setDeletingId(null)
     }
+  }
+
+  async function handleSystemUpdate() {
+    const result = await Swal.fire({
+      title: 'Proses ini akan mengunduh pembaruan dari GitHub dan me-restart server. Web akan tidak dapat diakses selama kurang lebih 30 detik. Lanjutkan?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Lanjutkan',
+      cancelButtonText: 'Batal',
+    })
+    if (!result.isConfirmed) {
+      return
+    }
+
+    setUpdating(true)
+    setUpdateError('')
+    let previousBoot = null
+    try {
+      const health = await api.get('/api/health')
+      previousBoot = health.data?.startedAt ?? null
+    } catch {
+      previousBoot = null
+    }
+
+    let sawOutage = previousBoot == null
+    try {
+      await api.post('/api/admin/system-update')
+    } catch (error) {
+      if (error.response) {
+        setUpdating(false)
+        setUpdateError(errorMessage(error, 'Gagal memulai pembaruan'))
+        return
+      }
+      sawOutage = true
+    }
+
+    let polls = 0
+    updateTimer.current = setInterval(async () => {
+      polls += 1
+      try {
+        const ping = await api.get('/api/health')
+        const boot = ping.data?.startedAt
+        const restarted = previousBoot != null
+          ? Boolean(boot) && boot !== previousBoot
+          : sawOutage && Boolean(boot)
+        if (restarted) {
+          clearInterval(updateTimer.current)
+          await Swal.fire({ icon: 'success', title: 'Update Berhasil' })
+          window.location.reload()
+          return
+        }
+      } catch {
+        sawOutage = true
+      }
+      if (polls >= 200) {
+        clearInterval(updateTimer.current)
+        setUpdating(false)
+        setUpdateError('Pembaruan belum selesai. Periksa server, lalu muat ulang halaman.')
+      }
+    }, 3000)
   }
 
   return (
@@ -308,6 +376,22 @@ function AccountSettings() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-rose-300 bg-rose-50 p-6 shadow-sm dark:border-rose-900 dark:bg-rose-950">
+        <h2 className="m-0 text-lg font-bold text-rose-800 dark:text-rose-200">Pembaruan Sistem</h2>
+        <p className="mt-1 mb-0 text-sm text-rose-700 dark:text-rose-300">
+          Mengunduh kode terbaru dari GitHub, lalu me-restart backend dan frontend. Halaman tidak bisa dipakai selama proses ini.
+        </p>
+        {updateError && <div className="mt-4"><Notice>{updateError}</Notice></div>}
+        <button
+          type="button"
+          className="mt-4 h-12 cursor-pointer rounded-xl border-2 border-rose-600 bg-transparent px-4 text-[15px] font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-wait disabled:opacity-70 dark:text-rose-200 dark:hover:bg-rose-900"
+          onClick={handleSystemUpdate}
+          disabled={updating}
+        >
+          {updating ? 'Sedang memperbarui... Harap tunggu' : 'Update Sistem ke Versi Terbaru'}
+        </button>
       </section>
 
       {editForm && (

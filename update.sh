@@ -25,7 +25,10 @@ if [[ ! -f "$APP_DIR/server.js" || ! -f "$APP_DIR/frontend/package.json" ]]; the
   die "update.sh harus berada di folder utama acs-standalone."
 fi
 
+# Paksa salinan lokal sama dengan GitHub. Perubahan lokal, termasuk package-lock.json, dibuang.
 echo -e "${YELLOW}Menarik kode terbaru dari GitHub...${NC}"
+git fetch --all
+git reset --hard origin/main
 git pull origin main
 
 # Paket backend ada di folder utama (package.json + server.js), bukan di folder modul backend/.

@@ -11,12 +11,16 @@ const { ensureTables: ensureAcsTables } = require('./backend/acs');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5001;
+const BOOTED_AT = Date.now();
 
 // Frontend GenieACS berjalan di port 5174 (localhost maupun IP LAN).
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Login bersifat publik; semua route /api lainnya wajib membawa token JWT.
+// Login dan ping kesehatan bersifat publik; semua route /api lainnya wajib membawa token JWT.
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, startedAt: BOOTED_AT });
+});
 app.use('/api/auth', require('./backend/routes/auth'));
 app.use('/api', requireAuth);
 app.use('/api/acs', require('./backend/routes/acs'));

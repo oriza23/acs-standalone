@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const { spawn } = require('child_process');
 const express = require('express');
 const pool = require('../../database');
 const requireRole = require('../middleware/requireRole');
@@ -6,6 +8,30 @@ const { hashBcrypt, hashPassword, isBcryptHash, isScryptHash, verifyBcrypt, veri
 
 const router = express.Router();
 const requireAdmin = requireRole('admin');
+const UPDATE_SCRIPT = '/var/www/acs-standalone/update.sh';
+
+router.post('/system-update', requireAdmin, (req, res) => {
+  if (!fs.existsSync(UPDATE_SCRIPT)) {
+    return res.status(500).json({
+      success: false,
+      message: 'Berkas update.sh tidak ditemukan',
+    });
+  }
+
+  res.json({
+    status: 'updating',
+    success: true,
+    message: 'Pembaruan dimulai',
+  });
+
+  // Respons sudah dikirim. Proses dilepas dari Node supaya tetap jalan saat PM2 me-restart backend.
+  const child = spawn('bash', [UPDATE_SCRIPT], {
+    cwd: '/var/www/acs-standalone',
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+});
 
 function readText(value) {
   return typeof value === 'string' ? value.trim() : '';
