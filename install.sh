@@ -69,15 +69,14 @@ echo -e "${YELLOW}Memasang curl, git, dan MariaDB...${NC}"
 $SUDO apt update
 $SUDO apt install -y ca-certificates curl git mariadb-server openssl ufw
 
-node_ok() {
-  command -v node >/dev/null 2>&1 && node -e 'const [maj, min] = process.versions.node.split(".").map(Number); process.exit((maj > 22 || (maj === 22 && min >= 12) || (maj === 20 && min >= 19)) ? 0 : 1)'
-}
-if ! node_ok; then
-  echo -e "${YELLOW}Memasang Node.js 22 (dibutuhkan Vite 8)...${NC}"
+# Jangan menimpa Node.js yang sudah ada: GenieACS di server yang sama memakai versi itu.
+if node -v >/dev/null 2>&1; then
+  echo -e "${YELLOW}Node.js sudah terpasang ($(node -v)). Instalasi Node.js dilewati.${NC}"
+else
+  echo -e "${YELLOW}Node.js belum ada. Memasang Node.js 22...${NC}"
   curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
   $SUDO apt install -y nodejs
 fi
-node_ok || die "Node.js masih terlalu lama. Vite 8 membutuhkan 20.19+ atau 22.12+."
 
 echo -e "${YELLOW}Menyalakan MariaDB dan membuat database...${NC}"
 $SUDO systemctl enable --now mariadb
@@ -126,12 +125,19 @@ cd "$APP_DIR/frontend"
 npm install
 npm run build
 
-echo -e "${YELLOW}Memasang PM2 dan menjalankan layanan...${NC}"
-$SUDO npm install -g pm2
+echo -e "${YELLOW}Menjalankan acs-backend dan acs-frontend lewat PM2...${NC}"
+if ! command -v pm2 >/dev/null 2>&1; then
+  $SUDO npm install -g pm2
+fi
 cd "$APP_DIR"
-pm2 delete acs-backend >/dev/null 2>&1 || true
-pm2 delete acs-frontend >/dev/null 2>&1 || true
-pm2 start server.js --name acs-backend
+# Hanya dua proses aplikasi ini. Proses PM2 lain tidak dihentikan.
+if pm2 describe acs-backend >/dev/null 2>&1; then
+  pm2 delete acs-backend
+fi
+pm2 start "$APP_DIR/server.js" --name acs-backend --cwd "$APP_DIR"
+if pm2 describe acs-frontend >/dev/null 2>&1; then
+  pm2 delete acs-frontend
+fi
 pm2 serve "$APP_DIR/frontend/dist" "$FRONTEND_PORT" --name acs-frontend --spa
 pm2 save
 $SUDO env PATH="$PATH:/usr/bin" pm2 startup systemd -u "$APP_USER" --hp "$APP_HOME"
