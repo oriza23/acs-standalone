@@ -1,0 +1,994 @@
+.stok {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  color: #0b1f3a;
+}
+
+.stok-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.stok-stat {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 108px;
+  padding: 18px 18px 16px;
+  border: 1px solid #d7e4ee;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(8, 40, 68, 0.05);
+}
+
+.stok-stat p {
+  margin: 0;
+  color: #5d7488;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stok-stat strong {
+  display: block;
+  margin-top: 8px;
+  color: #0b1f3a;
+  font-size: 18px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.stok-stat > div span {
+  display: block;
+  margin-top: 6px;
+  color: #7b90a3;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stok-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+}
+
+.stok-stat-blue .stok-stat-icon {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.stok-stat-teal .stok-stat-icon {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.stok-stat-amber .stok-stat-icon {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.stok-stat-indigo .stok-stat-icon {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.stok-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stok-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
+}
+
+.stok-action:hover {
+  filter: brightness(1.06);
+}
+
+.stok-menu {
+  position: relative;
+  z-index: 30;
+}
+
+.stok-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  min-width: 196px;
+  padding: 6px;
+  border: 1px solid #d7e4ee;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 36px rgba(8, 40, 68, 0.16);
+}
+
+.stok-dropdown button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #16324f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stok-dropdown button:hover {
+  background: #f3f7fb;
+}
+
+.stok-dropdown button.is-danger {
+  color: #e11d48;
+}
+
+.stok-dropdown button.is-danger:hover {
+  background: #fff1f2;
+}
+
+.stok-action-blue {
+  background: #2563eb;
+}
+
+.stok-action-red {
+  background: #e11d48;
+}
+
+.stok-action-green {
+  background: #059669;
+}
+
+.stok-action-navy {
+  background: #1e3a8a;
+}
+
+.stok-action-ink {
+  background: #1f2937;
+}
+
+.stok-action-rose {
+  background: #fb7185;
+}
+
+.stok-action-orange {
+  background: #f97316;
+}
+
+.stok-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d7e4ee;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(8, 40, 68, 0.04);
+}
+
+.stok-filters select,
+.stok-filter,
+.stok-search {
+  height: 40px;
+  border: 1px solid #d3e0ea;
+  border-radius: 10px;
+  background: #f8fbfd;
+  color: #16324f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stok-filters select {
+  flex: 1 1 148px;
+  width: auto;
+  min-width: 148px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.stok-filter-date {
+  flex: 0 0 168px;
+}
+
+.stok-search {
+  flex: 1 1 220px;
+}
+
+.stok-filter,
+.stok-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px;
+  color: #5d7488;
+}
+
+.stok-filter input,
+.stok-search input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #0b1f3a;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+}
+
+.stok-filters select:focus,
+.stok-filter:focus-within,
+.stok-search:focus-within {
+  border-color: #0891b2;
+  box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.14);
+  background: #fff;
+}
+
+.stok-panel {
+  overflow: hidden;
+  border: 1px solid #d7e4ee;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(8, 40, 68, 0.06);
+}
+
+.stok-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #e6eef5;
+}
+
+.stok-panel-head p {
+  margin: 0 0 2px;
+  color: #0e7490;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.stok-panel-head h1 {
+  margin: 0;
+  color: #0b1f3a;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  font-weight: 750;
+}
+
+.stok-panel-head span {
+  color: #5d7488;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.stok-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-top: 1px solid #e8f0f6;
+  background: #fff;
+}
+
+.stok-info {
+  margin: 0;
+  color: #5d7488;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.stok-pages {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.stok-nav,
+.stok-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 12px;
+  border: 1px solid #d3e0ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #16324f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stok-nav:hover:not(:disabled),
+.stok-page:hover:not(.is-active) {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.stok-page.is-active {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.stok-gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  color: #7b90a3;
+  font-weight: 700;
+  user-select: none;
+}
+
+.stok-page:disabled {
+  cursor: not-allowed;
+}
+
+.stok-nav:disabled {
+  color: #94a3b8;
+  background: #f8fafc;
+  cursor: not-allowed;
+}
+
+.stok-status {
+  margin: 0;
+  padding: 22px 18px;
+  color: #4b647a;
+  font-size: 14px;
+}
+
+.stok-error {
+  color: #9f1239;
+}
+
+.stok-table-wrap {
+  overflow-x: auto;
+  transition: opacity 0.15s ease;
+}
+
+/* Saat pindah halaman: tabel lama tetap tampil (tanpa kedip) tapi diredupkan. */
+.stok-table-wrap.is-fetching {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.stok-table {
+  width: 100%;
+  min-width: 1480px;
+  border-collapse: collapse;
+}
+
+.stok-table th,
+.stok-table td {
+  padding: 13px 16px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.stok-table th {
+  background: #0c4a6e;
+  color: #f3fbff;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.stok-table td {
+  color: #16324f;
+  font-size: 14px;
+  border-bottom: 1px solid #e8f0f6;
+}
+
+.password-cell {
+  cursor: pointer;
+}
+
+.pwd-revealed {
+  display: none;
+}
+
+.password-cell:hover .pwd-revealed {
+  display: inline;
+}
+
+.password-cell:hover .pwd-masked {
+  display: none;
+}
+
+.stok-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.stok-table tbody tr:hover td {
+  background: #f3fafc;
+}
+
+.stok-table tbody tr.is-selected td {
+  background: #e7f6fb;
+}
+
+.stok-check {
+  width: 48px;
+  padding-right: 0;
+}
+
+.stok-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #0e7490;
+  cursor: pointer;
+}
+
+.stok-table thead .stok-check input {
+  accent-color: #e0f2fe;
+}
+
+.stok-table td:nth-child(2),
+.stok-table th:nth-child(2) {
+  width: 64px;
+  color: #7b90a3;
+}
+
+.stok-table th:nth-child(2) {
+  color: #d7eaf3;
+}
+
+.stok-code {
+  font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.stok-profil {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0c4a6e;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.stok-empty {
+  text-align: center;
+  color: #5d7488;
+}
+
+.stok-delete {
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: #e11d48;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.stok-delete:hover:not(:disabled) {
+  background: #be123c;
+}
+
+.stok-delete:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.stok-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 24, 44, 0.48);
+}
+
+.stok-modal {
+  width: min(1024px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(8, 24, 44, 0.28);
+}
+
+/* Tanpa border-box, input width:100% + padding melebar keluar kolom dan menimpa kolom sebelah. */
+.stok-modal,
+.stok-modal *,
+.stok-modal *::before,
+.stok-modal *::after {
+  box-sizing: border-box;
+}
+
+.stok-modal-head {
+  padding: 22px 22px 0;
+}
+
+.stok-modal-head h2 {
+  margin: 0;
+  color: #0b1f3a;
+  font-size: 20px;
+  letter-spacing: 0.03em;
+}
+
+.stok-modal-head p {
+  margin: 6px 0 0;
+  color: #5d7488;
+  font-size: 13px;
+}
+
+.stok-modal-form {
+  display: grid;
+  gap: 16px;
+  padding: 18px 22px 22px;
+}
+
+/* Form input 2/3 lebar, Ringkasan Harga 1/3 lebar. */
+.stok-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  align-items: start;
+}
+
+.stok-modal-fields {
+  grid-column: span 2;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stok-summary {
+  grid-column: span 1;
+}
+
+.stok-field input[readonly] {
+  background: #eef3f7;
+  color: #5d7488;
+}
+
+.stok-summary {
+  padding: 16px;
+  border: 1px solid #d7e4ee;
+  border-radius: 14px;
+  background: #f4f8fb;
+}
+
+.stok-summary h3 {
+  margin: 0;
+  color: #0b1f3a;
+  font-size: 15px;
+}
+
+.stok-summary > p {
+  margin: 4px 0 12px;
+  color: #5d7488;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.stok-summary dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.stok-summary dl div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.stok-summary dt {
+  color: #5d7488;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stok-summary dd {
+  margin: 0;
+  color: #0b1f3a;
+  font-size: 13px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.stok-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stok-field-wide {
+  grid-column: 1 / -1;
+}
+
+.stok-field span {
+  color: #4b647a;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+}
+
+.stok-field input,
+.stok-field select {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #d3e0ea;
+  border-radius: 10px;
+  background: #f8fbfd;
+  color: #16324f;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.stok-field input:focus,
+.stok-field select:focus {
+  border-color: #1e3a8a;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.14);
+}
+
+.stok-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
+.stok-modal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.stok-modal-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.stok-modal-btn-blue {
+  background: #1e3a8a;
+}
+
+.stok-modal-btn-gray {
+  background: #64748b;
+}
+
+.outlet-modal {
+  width: min(1120px, 100%);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 18px 8px;
+}
+
+.outlet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.outlet-head p {
+  margin: 0 0 4px;
+  color: #0e7490;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.outlet-head h2 {
+  margin: 0;
+  color: #0b1f3a;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.outlet-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d7e4ee;
+  border-radius: 10px;
+  background: #fff;
+  color: #16324f;
+  cursor: pointer;
+}
+
+.outlet-note {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #86efac;
+  border-radius: 12px;
+  background: #ecfdf3;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.outlet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.outlet-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.outlet-btn-green {
+  background: #059669;
+}
+
+.outlet-btn-blue {
+  background: #2563eb;
+}
+
+.outlet-toolbar select,
+.outlet-search {
+  height: 36px;
+  border: 1px solid #c9dbe8;
+  border-radius: 10px;
+  background: #f7fbfd;
+  color: #16324f;
+}
+
+.outlet-toolbar select {
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.outlet-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  margin-left: auto;
+  padding: 0 12px;
+}
+
+.outlet-search input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #0b1f3a;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.outlet-table-wrap {
+  margin-top: 14px;
+  overflow: auto;
+}
+
+.outlet-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+
+.outlet-table th,
+.outlet-table td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.outlet-table th {
+  background: #0c4a6e;
+  color: #f3fbff;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.outlet-table td {
+  border-bottom: 1px solid #e8f0f6;
+  color: #16324f;
+  font-size: 14px;
+}
+
+.outlet-table tbody tr.is-selected td {
+  background: #e7f6fb;
+}
+
+.outlet-table td.outlet-stock {
+  color: #e11d48;
+  font-weight: 800;
+}
+
+.outlet-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.outlet-status.is-active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.outlet-status.is-inactive {
+  background: #fee2e2;
+  color: #be123c;
+}
+
+.outlet-empty,
+.outlet-loading {
+  padding: 22px 14px;
+  color: #5d7488;
+  text-align: center;
+}
+
+.outlet-foot {
+  margin-top: 8px;
+  border-top: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.outlet-form-backdrop {
+  z-index: 90;
+}
+
+.outlet-form-modal {
+  width: min(768px, 100%);
+  padding: 24px;
+}
+
+.outlet-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 1100px) {
+  .stok-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .stok-stats,
+  .stok-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .stok-stat strong,
+  .stok-panel-head h1 {
+    font-size: 20px;
+  }
+
+  .stok-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .stok-action {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+  }
+
+}
+
+/* Di bawah 768px: Ringkasan Harga turun ke bawah form. */
+@media (max-width: 767px) {
+  .stok-modal-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .stok-modal-fields,
+  .stok-summary {
+    grid-column: auto;
+  }
+}
+
+/* Di bawah 640px: input berbaris satu kolom. */
+@media (max-width: 639px) {
+  .stok-modal-fields,
+  .outlet-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

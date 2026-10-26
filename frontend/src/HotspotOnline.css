@@ -1,0 +1,139 @@
+.online-toolbar {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.online-toolbar-actions,
+.online-toolbar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stok-action-muted {
+  background: #64748b;
+}
+
+.stok-action:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.online-toolbar-tools select,
+.online-toolbar-tools .stok-search {
+  height: 40px;
+  border: 1px solid #d3e0ea;
+  border-radius: 10px;
+  background: #fff;
+  color: #16324f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.online-toolbar-tools select {
+  min-width: 76px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.online-toolbar-tools .stok-search {
+  width: 240px;
+  color: #5d7488;
+}
+
+.online-spin {
+  animation: online-spin 0.8s linear infinite;
+}
+
+@keyframes online-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.online-table {
+  width: 100%;
+  min-width: 1680px;
+  border-collapse: collapse;
+}
+
+.online-table th,
+.online-table td {
+  padding: 13px 16px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.online-table th {
+  background: #0c4a6e;
+  color: #f3fbff;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+}
+
+.online-table td {
+  color: #16324f;
+  font-size: 14px;
+  border-bottom: 1px solid #e8f0f6;
+}
+
+.online-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.online-table tbody tr:hover td {
+  background: #f3fafc;
+}
+
+.online-table tbody tr.is-selected td {
+  background: #e7f6fb;
+}
+
+.online-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.online-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e11d48;
+  box-shadow: 0 0 0 3px #ffe4e6;
+}
+
+.online-dot.is-online {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px #dcfce7;
+}
+
+.online-table td.online-uptime {
+  color: #f97316;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.online-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.online-badge-upload {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.online-badge-download {
+  background: #dbeafe;
+  color: #1d4ed8;
+}

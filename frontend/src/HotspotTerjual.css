@@ -1,0 +1,71 @@
+.stok-action-tosca {
+  background: #0f766e;
+}
+
+.stok-stat-expired p,
+.stok-stat-expired strong,
+.stok-stat-expired > div span {
+  color: #e11d48;
+}
+
+.stok-stat-expired .stok-stat-icon {
+  background: #ffe4e6;
+  color: #e11d48;
+}
+
+.terjual-table {
+  width: 100%;
+  min-width: 1860px;
+  border-collapse: collapse;
+}
+
+.terjual-table th,
+.terjual-table td {
+  padding: 13px 16px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.terjual-table th {
+  background: #0c4a6e;
+  color: #f3fbff;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+}
+
+.terjual-table td {
+  color: #16324f;
+  font-size: 14px;
+  border-bottom: 1px solid #e8f0f6;
+}
+
+.terjual-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.terjual-table tbody tr:hover td {
+  background: #f3fafc;
+}
+
+.terjual-table tbody tr.is-selected td {
+  background: #e7f6fb;
+}
+
+.terjual-table tbody tr.terjual-expired td,
+.terjual-table tbody tr.terjual-expired .stok-profil,
+.terjual-table tbody tr.terjual-expired .stok-code,
+.terjual-table tbody tr.terjual-expired .pwd-masked,
+.terjual-table tbody tr.terjual-expired .pwd-revealed {
+  color: #e11d48;
+  font-weight: 700;
+}
+
+.terjual-table tbody tr.terjual-expired .stok-profil {
+  background: #ffe4e6;
+}
+
+.terjual-table tbody tr.terjual-expired:hover td {
+  background: #fff1f2;
+}

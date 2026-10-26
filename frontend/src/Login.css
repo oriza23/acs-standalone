@@ -1,0 +1,224 @@
+#root {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border: none;
+  text-align: left;
+  display: block;
+}
+
+.login-page {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(56, 189, 248, 0.28), transparent 32%),
+    radial-gradient(circle at 85% 80%, rgba(14, 116, 144, 0.45), transparent 36%),
+    linear-gradient(160deg, #041525 0%, #0a3558 48%, #0e7490 100%);
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  color: #e8f4fb;
+}
+
+.login-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.login-glow-left {
+  width: 280px;
+  height: 280px;
+  left: -80px;
+  bottom: -60px;
+  background: rgba(8, 145, 178, 0.35);
+}
+
+.login-glow-right {
+  width: 220px;
+  height: 220px;
+  right: 8%;
+  top: 10%;
+  background: rgba(125, 211, 252, 0.16);
+}
+
+.login-card {
+  position: relative;
+  width: min(100%, 420px);
+  padding: 36px 32px 32px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 60px rgba(2, 12, 27, 0.35);
+  color: #0f2744;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.login-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #0c4a6e, #0891b2);
+  color: #f0f9ff;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.login-kicker {
+  margin: 0 0 2px;
+  color: #0e7490;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.login-card h1 {
+  margin: 0;
+  color: #0b1f3a;
+  font-size: 26px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  font-weight: 650;
+}
+
+.login-lead {
+  margin: 18px 0 0;
+  color: #4b647a;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.login-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.login-field {
+  display: grid;
+  gap: 8px;
+}
+
+.login-field span {
+  color: #16324f;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid #c9dbe8;
+  border-radius: 12px;
+  background: #f7fbfd;
+  color: #5d7488;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.login-input:focus-within {
+  border-color: #0891b2;
+  box-shadow: 0 0 0 4px rgba(8, 145, 178, 0.16);
+  background: #fff;
+}
+
+.login-input input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: #0b1f3a;
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.login-input input::placeholder {
+  color: #8aa0b5;
+}
+
+.login-toggle {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #5d7488;
+  cursor: pointer;
+}
+
+.login-toggle:hover {
+  color: #0e7490;
+}
+
+.login-error,
+.login-notice {
+  margin: 18px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.login-notice {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.login-button {
+  height: 50px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #0e7490 0%, #0c4a6e 100%);
+  color: #f8fcff;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(12, 74, 110, 0.28);
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.login-button:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.login-button:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 28px 20px 24px;
+  }
+
+  .login-card h1 {
+    font-size: 22px;
+  }
+}

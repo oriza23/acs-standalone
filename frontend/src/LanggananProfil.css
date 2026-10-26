@@ -1,0 +1,269 @@
+.langganan-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.langganan-menu {
+  position: relative;
+  z-index: 30;
+}
+
+.langganan-toolbar select,
+.langganan-toolbar .stok-search {
+  height: 40px;
+  border: 1px solid #d3e0ea;
+  border-radius: 10px;
+  background: #fff;
+  color: #16324f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.langganan-toolbar select {
+  min-width: 128px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.langganan-toolbar .stok-search {
+  width: 220px;
+  margin-left: auto;
+  color: #5d7488;
+}
+
+.langganan-table {
+  width: 100%;
+  min-width: 1280px;
+  border-collapse: collapse;
+}
+
+.langganan-table th,
+.langganan-table td {
+  padding: 13px 16px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.langganan-table th {
+  background: #0c4a6e;
+  color: #f3fbff;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+}
+
+.langganan-table td {
+  color: #16324f;
+  font-size: 14px;
+  border-bottom: 1px solid #e8f0f6;
+}
+
+.langganan-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.langganan-table tbody tr:hover td {
+  background: #f3fafc;
+}
+
+.langganan-table tbody tr.is-selected td {
+  background: #e7f6fb;
+}
+
+.langganan-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.langganan-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06);
+}
+
+.langganan-harga {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 108px;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.langganan-pelanggan {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #0f766e;
+  color: #f0fdfa;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.langganan-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 24, 42, 0.46);
+}
+
+.langganan-modal {
+  width: min(896px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(8, 24, 42, 0.28);
+}
+
+.langganan-modal,
+.langganan-modal *,
+.langganan-modal *::before,
+.langganan-modal *::after {
+  box-sizing: border-box;
+}
+
+.langganan-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 8px;
+}
+
+.langganan-modal-head p {
+  margin: 0 0 2px;
+  color: #0e7490;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.langganan-modal-head h2 {
+  margin: 0;
+  color: #0b1f3a;
+  font-size: 22px;
+}
+
+.langganan-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #334155;
+  cursor: pointer;
+}
+
+.langganan-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 12px 20px 4px;
+}
+
+.langganan-form-grid label {
+  min-width: 0;
+}
+
+.langganan-form-grid label {
+  display: grid;
+  gap: 6px;
+  color: #47627a;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.langganan-form-grid input,
+.langganan-form-grid select {
+  height: 40px;
+  width: 100%;
+  border: 1px solid #d3e0ea;
+  border-radius: 10px;
+  background: #f8fbfd;
+  color: #0b1f3a;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0 12px;
+}
+
+.langganan-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.langganan-color input[type='color'] {
+  flex: 0 0 46px;
+  width: 46px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.langganan-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px 20px;
+}
+
+.langganan-btn {
+  height: 40px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.langganan-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.langganan-btn-gray {
+  background: #64748b;
+}
+
+.langganan-btn-blue {
+  background: #2563eb;
+}
+
+@media (max-width: 639px) {
+  .langganan-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+
+  .langganan-toolbar .stok-search {
+    margin-left: 0;
+    width: 100%;
+  }
+}

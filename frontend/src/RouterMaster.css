@@ -1,0 +1,64 @@
+.router-page .profil-table {
+  min-width: 860px;
+}
+
+.router-page .profil-table-wrap {
+  overflow-x: auto;
+}
+
+.password-cell {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pwd-revealed {
+  display: none;
+}
+
+.password-cell:hover .pwd-revealed {
+  display: inline;
+}
+
+.password-cell:hover .pwd-masked {
+  display: none;
+}
+
+.router-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+/* Dropdown pada form Tambah Server, tampilannya sama dengan input. */
+.router-page .profil-field select {
+  width: 100%;
+  box-sizing: border-box;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid #c9dbe8;
+  border-radius: 12px;
+  background: #f7fbfd;
+  color: #0b1f3a;
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.router-page .profil-field select:focus {
+  border-color: #0891b2;
+  box-shadow: 0 0 0 4px rgba(8, 145, 178, 0.16);
+  background: #fff;
+}
+
+.router-page .server-hint {
+  margin: 0;
+  color: #4b647a;
+  font-size: 13px;
+  line-height: 1.5;
+}

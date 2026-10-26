@@ -1,0 +1,11 @@
+{
+  // Panel PORTS: hanya 5001 (backend) dan 5174 (frontend) yang diteruskan.
+  // Port acak dari proses internal editor (inspector, language server, dll) diabaikan.
+  "remote.autoForwardPorts": true,
+  "remote.autoForwardPortsSource": "process",
+  "remote.portsAttributes": {
+    "5001": { "label": "Backend (server.js)", "onAutoForward": "silent" },
+    "5174": { "label": "Frontend (Vite)", "onAutoForward": "silent" }
+  },
+  "remote.otherPortsAttributes": { "onAutoForward": "ignore" }
+}

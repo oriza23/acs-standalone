@@ -1,0 +1,326 @@
+/* Halaman yang belum dipindah ke utility class tetap mengikuti class "dark" pada <html>.
+   Selector di sini lebih spesifik daripada aturan warna di file CSS masing-masing halaman. */
+
+.dark .stok,
+.dark .hprofil,
+.dark .setting-page,
+.dark .admin-page,
+.dark .pelanggan,
+.dark .monitoring,
+.dark .langganan {
+  color: #f3f4f6;
+}
+
+.dark .stok-stat,
+.dark .stok-filters,
+.dark .stok-panel,
+.dark .stok-foot,
+.dark .stok-dropdown,
+.dark .stok-modal,
+.dark .hprofil-bar,
+.dark .hprofil-panel,
+.dark .hprofil-foot,
+.dark .hprofil-dropdown,
+.dark .hprofil-modal,
+.dark .data-modal,
+.dark .langganan-modal,
+.dark .health-panel,
+.dark .health-card,
+.dark .setting-card,
+.dark .profil-form,
+.dark .profil-card,
+.dark .admin-form,
+.dark .admin-card,
+.dark .pelanggan-form,
+.dark .pelanggan-card,
+.dark .monitoring-card,
+.dark .stok-nav,
+.dark .stok-page,
+.dark .hprofil-nav,
+.dark .hprofil-page,
+.dark .outlet-close,
+.dark .data-note,
+.dark .data-close,
+.dark .langganan-close,
+.dark .profil-cancel,
+.dark .admin-cancel,
+.dark .pelanggan-cancel {
+  background-color: #1f2937;
+  border-color: #374151;
+  color: #f3f4f6;
+  transition: background-color 300ms, color 300ms, border-color 300ms;
+}
+
+.dark .stok-page.is-active,
+.dark .hprofil-page.is-active {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.dark .stok-nav:disabled,
+.dark .hprofil-nav:disabled {
+  background-color: #111827;
+  color: #6b7280;
+}
+
+/* ---- Isi tabel ----
+   Semua sel diberi latar gelap eksplisit (bukan transparan) supaya tidak ada baris yang
+   tetap putih. Urutan penting: dasar -> zebra -> hover -> terpilih/edit (spesifisitas sama,
+   yang terakhir menang). */
+.dark .stok-table td,
+.dark .outlet-table td,
+.dark .hprofil-table td,
+.dark .data-table td,
+.dark .langganan-table td,
+.dark .online-table td,
+.dark .terjual-table td,
+.dark .profil-table td,
+.dark .admin-table td,
+.dark .pelanggan-table td,
+.dark .monitoring-table td,
+.dark .setting-status-table td {
+  background-color: #1f2937;
+  color: #f3f4f6;
+  border-bottom-color: #374151;
+}
+
+/* Zebra baris genap (di mode terang berwarna #f7fbfd). */
+.dark .profil-table tbody tr:nth-child(even) td,
+.dark .admin-table tbody tr:nth-child(even) td,
+.dark .pelanggan-table tbody tr:nth-child(even) td,
+.dark .monitoring-table tbody tr:nth-child(even) td {
+  background-color: #243041;
+}
+
+.dark .stok-table tbody tr:hover td,
+.dark .hprofil-table tbody tr:hover td,
+.dark .data-table tbody tr:hover td,
+.dark .langganan-table tbody tr:hover td,
+.dark .online-table tbody tr:hover td,
+.dark .terjual-table tbody tr:hover td,
+.dark .profil-table tbody tr:hover td,
+.dark .admin-table tbody tr:hover td,
+.dark .pelanggan-table tbody tr:hover td,
+.dark .monitoring-table tbody tr:hover td {
+  background-color: #111827;
+}
+
+.dark .stok-table tbody tr.is-selected td,
+.dark .outlet-table tbody tr.is-selected td,
+.dark .hprofil-table tbody tr.is-selected td,
+.dark .data-table tbody tr.is-selected td,
+.dark .langganan-table tbody tr.is-selected td,
+.dark .online-table tbody tr.is-selected td,
+.dark .terjual-table tbody tr.is-selected td,
+.dark .profil-table tbody tr.is-editing td,
+.dark .admin-table tbody tr.is-editing td,
+.dark .pelanggan-table tbody tr.is-editing td {
+  background-color: #0c4a6e;
+}
+
+/* Warna aksen per-kolom tetap dipertahankan (aturan dasar di atas akan menimpanya). */
+.dark .online-table td.online-uptime {
+  color: #fb923c;
+}
+
+.dark .outlet-table td.outlet-stock {
+  color: #fb7185;
+}
+
+.dark .setting-status-table td.is-ok {
+  color: #34d399;
+}
+
+.dark .setting-status-table td.is-warn {
+  color: #fbbf24;
+}
+
+/* Kolom nomor urut memakai abu-abu gelap di mode terang; terangkan di mode gelap. */
+.dark .profil-table td:first-child,
+.dark .admin-table td:first-child,
+.dark .pelanggan-table td:first-child,
+.dark .monitoring-table td:first-child {
+  color: #9ca3af;
+}
+
+/* Voucher terjual yang sudah kedaluwarsa: teks merah tetap terbaca di latar gelap. */
+.dark .terjual-table tbody tr.terjual-expired td {
+  color: #fb7185;
+}
+
+.dark .terjual-table tbody tr.terjual-expired:hover td {
+  background-color: #4c0519;
+}
+
+.dark .terjual-table tbody tr.terjual-expired .stok-profil {
+  background-color: #4c0519;
+  color: #fb7185;
+}
+
+.dark .stok-stat strong,
+.dark .stok-stat p,
+.dark .stok-panel-head h1,
+.dark .stok-panel-head p,
+.dark .stok-panel-head span,
+.dark .stok-info,
+.dark .hprofil-info,
+.dark .hprofil-head h1,
+.dark .outlet-head h2,
+.dark .outlet-head p,
+.dark .hprofil-modal-head h2,
+.dark .hprofil-modal-head p,
+.dark .data-modal-head h2,
+.dark .data-modal-head p,
+.dark .langganan-modal-head h2,
+.dark .langganan-modal-head p,
+.dark .stok-modal-head h2,
+.dark .stok-modal-head p,
+.dark .stok-summary h3,
+.dark .stok-summary > p,
+.dark .stok-summary dt,
+.dark .stok-summary dd,
+.dark .profil-header h1,
+.dark .profil-header p,
+.dark .admin-header h1,
+.dark .admin-header p,
+.dark .setting-header h1,
+.dark .setting-header p,
+.dark .monitoring-header h1,
+.dark .monitoring-header p,
+.dark .pelanggan-header h1,
+.dark .pelanggan-header p,
+.dark .health-head h2,
+.dark .health-head p,
+.dark .stok-field span,
+.dark .hprofil-field span,
+.dark .data-form-grid label,
+.dark .langganan-form-grid label,
+.dark .profil-field span,
+.dark .admin-field span,
+.dark .pelanggan-field span,
+.dark .setting-field span {
+  color: #e5e7eb;
+}
+
+.dark .stok-panel-head p,
+.dark .outlet-head p,
+.dark .data-modal-head p,
+.dark .langganan-modal-head p,
+.dark .hprofil-modal-head p,
+.dark .stok-stat p,
+.dark .stok-info,
+.dark .stok-summary dt,
+.dark .stok-summary > p,
+.dark .stok-modal-head p {
+  color: #9ca3af;
+}
+
+.dark .stok-field input,
+.dark .stok-field select,
+.dark .stok-filters select,
+.dark .stok-search,
+.dark .stok-filter,
+.dark .hprofil-field input,
+.dark .hprofil-field select,
+.dark .hprofil-control,
+.dark .hprofil-search,
+.dark .data-form-grid input,
+.dark .data-form-grid select,
+.dark .data-form-grid textarea,
+.dark .langganan-form-grid input,
+.dark .langganan-form-grid select,
+.dark .profil-field input,
+.dark .profil-field select,
+.dark .admin-field input,
+.dark .admin-field select,
+.dark .pelanggan-field input,
+.dark .pelanggan-field select,
+.dark .setting-field select,
+.dark .data-toolbar select,
+.dark .langganan-toolbar select,
+.dark .online-toolbar-tools select,
+.dark .outlet-toolbar select,
+.dark .outlet-search {
+  background-color: #111827;
+  border-color: #4b5563;
+  color: #f3f4f6;
+}
+
+.dark .stok-filter input,
+.dark .stok-search input,
+.dark .hprofil-search input,
+.dark .outlet-search input,
+.dark .profil-field input,
+.dark .admin-field input,
+.dark .pelanggan-field input {
+  color: #f3f4f6;
+}
+
+.dark .stok-field input[readonly] {
+  background-color: #0f172a;
+  color: #9ca3af;
+}
+
+.dark .stok-summary {
+  background-color: #111827;
+  border-color: #374151;
+}
+
+.dark .stok-summary dl div {
+  background-color: #1f2937;
+}
+
+.dark .stok-dropdown button,
+.dark .hprofil-dropdown button {
+  color: #f3f4f6;
+}
+
+.dark .stok-dropdown button:hover,
+.dark .hprofil-dropdown button:hover {
+  background-color: #374151;
+}
+
+.dark .stok-dropdown button.is-danger,
+.dark .hprofil-dropdown button.is-danger {
+  color: #fb7185;
+}
+
+.dark .stok-dropdown button.is-danger:hover,
+.dark .hprofil-dropdown button.is-danger:hover {
+  background-color: #4c0519;
+}
+
+.dark .outlet-note {
+  background-color: #052e16;
+  border-color: #166534;
+  color: #bbf7d0;
+}
+
+.dark .stok-profil {
+  background-color: #0c4a6e;
+  color: #e0f2fe;
+}
+
+.dark .outlet-status.is-active {
+  background-color: #064e3b;
+  color: #d1fae5;
+}
+
+.dark .outlet-status.is-inactive {
+  background-color: #4c0519;
+  color: #fecdd3;
+}
+
+.dark .stok-empty,
+.dark .outlet-empty,
+.dark .outlet-loading,
+.dark .hprofil-empty,
+.dark .stok-status,
+.dark .hprofil-status,
+.dark .profil-status,
+.dark .admin-status,
+.dark .pelanggan-status,
+.dark .monitoring-status {
+  color: #9ca3af;
+}
