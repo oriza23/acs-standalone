@@ -4,9 +4,41 @@ Panduan ini memasang aplikasi manajemen GenieACS (backend Express + frontend Vit
 
 GenieACS sendiri (NBI, biasanya port 7557) dipasang terpisah. Setelah login, alamat server GenieACS diisi dari menu aplikasi.
 
-## 1. Environment dasar
+Ambil kode aplikasi sekali, lalu pilih salah satu cara pemasangan di bawah.
 
-Vite 8.3 yang dipakai frontend membutuhkan **Node.js 20.19 ke atas, atau Node.js 22.12 ke atas**. Panduan ini memakai **Node.js 22** (sama dengan lingkungan pengembangan proyek). Node bawaan repositori Ubuntu 24.04 terlalu lama untuk membangun frontend.
+```bash
+sudo mkdir -p /var/www
+sudo chown "$USER:$USER" /var/www
+git clone https://github.com/oriza23/acs-standalone.git /var/www/acs-standalone
+cd /var/www/acs-standalone
+```
+
+Struktur folder:
+
+- Akar repositori (`package.json`, `server.js`) adalah **backend**.
+- Folder `frontend/` adalah aplikasi Vite.
+- Folder `backend/` berisi modul yang dipanggil `server.js`, bukan paket npm terpisah.
+
+## Opsi 1: Instalasi Otomatis (Rekomendasi)
+
+`install.sh` menanyakan nama database, username, dan password. Nilai bawaan bila Enter ditekan adalah `acs_db` dan `oriza`. Password yang dikosongkan dibuat otomatis.
+
+Script kemudian memasang curl, Git, MariaDB, dan Node.js 22, membuat database beserta hak aksesnya, menulis `.env`, menjalankan `npm install` di backend dan frontend, membangun frontend, mendaftarkan kedua layanan ke PM2, menyimpan proses agar hidup lagi setelah reboot, dan membuka port **5001** serta **5174** di UFW.
+
+Dari folder proyek:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+Di akhir, script menampilkan alamat `http://<IP_SERVER>:5174` beserta username `admin` dan password yang baru dibuat. Simpan password itu. Akun admin hanya dibuat bila tabel `web_admins` masih kosong.
+
+## Opsi 2: Instalasi Manual
+
+Vite 8.3 yang dipakai frontend membutuhkan **Node.js 20.19 ke atas, atau Node.js 22.12 ke atas**. Panduan ini memakai **Node.js 22**. Node bawaan repositori Ubuntu 24.04 terlalu lama untuk membangun frontend.
+
+### 1. Environment dasar
 
 Masuk sebagai pengguna yang akan menjalankan aplikasi (bukan sesi root terus-menerus), lalu:
 
@@ -41,22 +73,7 @@ sudo systemctl enable --now mariadb
 sudo systemctl status mariadb
 ```
 
-## 2. Ambil kode aplikasi
-
-```bash
-sudo mkdir -p /var/www
-sudo chown "$USER:$USER" /var/www
-git clone https://github.com/oriza23/acs-standalone.git /var/www/acs-standalone
-cd /var/www/acs-standalone
-```
-
-Struktur yang dipakai saat menjalankan:
-
-- Akar repositori (`package.json`, `server.js`) adalah **backend**.
-- Folder `frontend/` adalah aplikasi Vite.
-- Folder `backend/` berisi modul yang dipanggil `server.js`, bukan paket npm terpisah.
-
-## 3. Buat database `acs_db`
+### 2. Buat database `acs_db`
 
 Di Ubuntu 24.04, akun root MariaDB memakai soket sistem. Masuk dengan:
 
@@ -76,7 +93,7 @@ EXIT;
 
 Tabel `web_admins`, `data_server_acs`, dan `acs_devices` dibuat otomatis saat backend pertama kali berhasil terhubung. Tidak perlu mengimpor berkas SQL.
 
-## 4. Konfigurasi `.env`
+### 3. Konfigurasi `.env`
 
 Backend membaca `/var/www/acs-standalone/.env` saat proses dimulai. Nilai yang sudah ada di lingkungan proses (misalnya dari PM2) tidak ditimpa oleh berkas ini.
 
@@ -109,7 +126,7 @@ Batasi izin berkas:
 chmod 600 .env
 ```
 
-Akun admin awal hanya dibuat bila `BOOTSTRAP_ADMIN_USERNAME` dan `BOOTSTRAP_ADMIN_PASSWORD` terisi **dan** tabel `web_admins` masih kosong. Isi keduanya sebelum backend pertama kali dijalankan.
+Akun admin awal hanya dibuat bila `BOOTSTRAP_ADMIN_USERNAME` dan `BOOTSTRAP_ADMIN_PASSWORD` terisi dan tabel `web_admins` masih kosong. Isi keduanya sebelum backend pertama kali dijalankan.
 
 Frontend membaca alamat API pada saat **build**, dari `frontend/.env.production`. Ganti `203.0.113.10` dengan IP atau nama domain server yang dibuka browser.
 
@@ -123,7 +140,7 @@ VITE_API_URL=http://203.0.113.10:5001
 
 Jangan menambahkan akhiran `/api`. Path itu sudah ada di kode klien. Jika berkas ini tidak ada, browser memakai hostname halaman web dengan port 5001.
 
-## 5. Instal dependensi
+### 4. Instal dependensi
 
 Dari akar proyek (backend):
 
@@ -139,7 +156,7 @@ cd /var/www/acs-standalone/frontend
 npm install
 ```
 
-## 6. Build frontend untuk produksi
+### 5. Build frontend untuk produksi
 
 Masih di dalam folder `frontend`:
 
@@ -149,7 +166,7 @@ npm run build
 
 Hasilnya ada di `frontend/dist/`. Ulangi perintah ini setiap kali `VITE_API_URL` atau kode frontend berubah, lalu muat ulang proses PM2 frontend.
 
-## 7. Jalankan dengan PM2
+### 6. Jalankan dengan PM2
 
 Kembali ke akar proyek dan daftarkan kedua proses:
 
@@ -181,7 +198,7 @@ pm2 stop all
 
 Setelah mengubah `.env` backend, jalankan `pm2 restart acs-backend`. Setelah build frontend baru, jalankan `pm2 restart acs-frontend`.
 
-## 8. Auto-run setelah reboot
+### 7. Auto-run setelah reboot
 
 Simpan daftar proses yang sedang berjalan, lalu pasang layanan systemd. `pm2 startup` mencetak satu perintah `sudo ...` yang harus disalin dan dijalankan.
 
@@ -210,7 +227,7 @@ pm2 status
 
 `acs-backend` dan `acs-frontend` harus berstatus `online`.
 
-## 9. Firewall
+### 8. Firewall
 
 Jika UFW dipakai, buka port web dan API:
 
@@ -223,3 +240,41 @@ sudo ufw status
 ```
 
 Port MariaDB `3306` tetap tertutup dari luar. Aplikasi hanya terhubung ke `localhost`.
+
+## Cara Mengakses Aplikasi
+
+Cek alamat server dari terminal Ubuntu.
+
+IP lokal (di jaringan yang sama dengan server):
+
+```bash
+ip a
+```
+
+Lihat alamat pada antarmuka yang aktif, biasanya `eth0` atau `ens18`, berbentuk `192.168.x.x` atau `10.x.x.x`.
+
+IP publik (diakses dari internet):
+
+```bash
+curl ifconfig.me
+```
+
+Buka aplikasi di browser dengan IP tersebut dan port frontend. PM2 menyajikan hasil build Vite di port **5174**:
+
+```text
+http://<IP_SERVER_UBUNTU>:5174
+```
+
+Contoh: `http://192.168.69.70:5174` di jaringan lokal, atau `http://203.0.113.10:5174` lewat internet.
+
+Backend tetap di port **5001**. Browser memanggil API ke `http://<IP_SERVER_UBUNTU>:5001`, sesuai `VITE_API_URL` saat build.
+
+Kedua port itu harus berstatus terbuka di firewall UFW, kalau tidak halaman web atau login gagal terhubung:
+
+```bash
+sudo ufw allow 5174/tcp
+sudo ufw allow 5001/tcp
+sudo ufw status
+```
+
+Pada daftar UFW, `5174/tcp` dan `5001/tcp` tampil sebagai `ALLOW`. Pemasangan UFW ada di bagian Firewall pada Opsi 2. Opsi 1 sudah membuka kedua port itu.
