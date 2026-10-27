@@ -341,6 +341,16 @@ function statusFromInform(lastInform, now) {
   return 'off24plus'
 }
 
+function deviceIsOffline(device, now = Date.now()) {
+  if (device?.last_inform) {
+    return statusFromInform(device.last_inform, now) !== 'online'
+  }
+  if (device?.status) {
+    return device.status !== 'online'
+  }
+  return true
+}
+
 // last_inform baru lebih baru daripada nilai yang disimpan saat Summon diklik.
 function isNewerInform(next, previous) {
   const nextTime = informMillis(next)
@@ -607,9 +617,9 @@ function LanCard({ icon: Icon, iconClass, title, className = '', children }) {
 
 function LanRow({ label, children }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2 text-sm">
-      <span className="text-gray-500 dark:text-gray-400">{label}</span>
-      <span className="min-w-0 truncate text-right font-semibold text-gray-900 dark:text-gray-100">{children}</span>
+    <div className="flex flex-col gap-0.5 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <span className="shrink-0 text-gray-500 dark:text-gray-400">{label}</span>
+      <span className="min-w-0 break-words font-semibold text-gray-900 sm:text-right dark:text-gray-100">{children}</span>
     </div>
   )
 }
@@ -766,8 +776,8 @@ function WanPanel({ wans, loading, error, onOverlayChange, setWanToDelete, delet
       {hasWans ? (
         wans.map((wan) => (
           <article key={wan.id} className="mb-4 overflow-hidden rounded border border-gray-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-900">
-            <header className="flex items-center justify-between bg-cyan-500 px-4 py-2 text-white">
-              <div className="flex min-w-0 items-center gap-3">
+            <header className="flex flex-wrap items-center justify-between gap-2 bg-cyan-500 px-4 py-2 text-white">
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
                 <span className="text-sm font-bold tracking-wide">WAN {wan.type}</span>
                 <span className={`rounded-full bg-white px-2.5 py-0.5 text-xs font-bold ${wanStatusClass(wan.status)}`}>
                   {wan.status || '-'}
@@ -1362,9 +1372,9 @@ function EditLanModal({ form, updating, onChange, onClose, onSubmit }) {
 
 function DetailRow({ label, children }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-gray-100 py-2 last:border-b-0 dark:border-slate-700">
+    <div className="flex flex-col gap-0.5 border-b border-gray-100 py-2 last:border-b-0 md:flex-row md:items-baseline md:justify-between md:gap-3 dark:border-slate-700">
       <dt className="shrink-0 text-xs font-bold tracking-wide text-gray-500 uppercase dark:text-gray-400">{label}</dt>
-      <dd className="m-0 min-w-0 truncate text-right text-sm font-medium text-gray-900 dark:text-gray-100">{children}</dd>
+      <dd className="m-0 min-w-0 break-words text-left text-sm font-medium text-gray-900 md:text-right dark:text-gray-100">{children}</dd>
     </div>
   )
 }
@@ -1403,7 +1413,7 @@ function DeviceDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-60 flex items-center justify-center overflow-x-hidden bg-black/50 p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose()
@@ -1411,13 +1421,13 @@ function DeviceDetailModal({
       }}
     >
       <div
-        className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-slate-800"
+        className="max-h-[90vh] w-full min-w-0 max-w-5xl overflow-x-hidden overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-slate-800"
         role="dialog"
         aria-modal="true"
         aria-labelledby="acs-detail-title"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-slate-700 dark:bg-slate-800">
-          <h2 id="acs-detail-title" className="m-0 text-base font-bold tracking-wide text-gray-900 dark:text-gray-100">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-4 sm:px-6 dark:border-slate-700 dark:bg-slate-800">
+          <h2 id="acs-detail-title" className="m-0 min-w-0 break-words text-base font-bold tracking-wide text-gray-900 dark:text-gray-100">
             DETAIL PERANGKAT
           </h2>
           <button
@@ -1430,12 +1440,21 @@ function DeviceDetailModal({
           </button>
         </div>
 
-        <div className="grid gap-6 p-6">
+        <div className="grid min-w-0 gap-6 p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <DetailIndicator label="REDAMAN ONU">{renderRx(device.rx_onu)}</DetailIndicator>
             <DetailIndicator label="TEMPERATURE">{renderTemp(device.temp)}</DetailIndicator>
             <DetailIndicator label="UPTIME">{formatUptime(device.uptime)}</DetailIndicator>
           </div>
+
+          <button
+            type="button"
+            className="w-full cursor-pointer rounded-md border-0 bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto md:justify-self-start"
+            disabled={summoning}
+            onClick={onSummon}
+          >
+            {summoning ? 'Memanggil...' : 'Summon'}
+          </button>
 
           <div className="grid grid-cols-1 gap-x-8 gap-y-2 md:grid-cols-3">
             <dl className="m-0">
@@ -1457,8 +1476,8 @@ function DeviceDetailModal({
             </dl>
           </div>
 
-          <div>
-            <div className="flex items-end justify-between gap-3 border-b border-gray-200 dark:border-slate-700">
+          <div className="min-w-0">
+            <div className="border-b border-gray-200 dark:border-slate-700">
               <div className="flex flex-wrap gap-1" role="tablist">
                 {DETAIL_TABS.map((tab) => (
                   <button
@@ -1466,26 +1485,18 @@ function DeviceDetailModal({
                     type="button"
                     role="tab"
                     aria-selected={activeTab === tab}
-                    className={`-mb-px cursor-pointer border-0 border-b-2 bg-transparent px-4 py-2.5 text-[13px] font-bold tracking-wide transition-colors ${activeTab === tab ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`}
+                    className={`-mb-px cursor-pointer border-0 border-b-2 bg-transparent px-3 py-2.5 text-[13px] font-bold tracking-wide transition-colors sm:px-4 ${activeTab === tab ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}`}
                     onClick={() => onTabChange(tab)}
                   >
                     {tab}
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                className="mb-1.5 cursor-pointer rounded-md border-0 bg-red-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={summoning}
-                onClick={onSummon}
-              >
-                {summoning ? 'Memanggil...' : 'Summon'}
-              </button>
             </div>
 
             <div className="pt-4">
               {activeTab === 'TERHUBUNG' ? (
-                <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
+                <div className="w-full max-w-[100vw] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
                   <table className="w-full min-w-max border-collapse">
                     <thead>
                       <tr>
@@ -1518,7 +1529,7 @@ function DeviceDetailModal({
                   </table>
                 </div>
               ) : activeTab === 'WLAN' ? (
-                <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
+                <div className="w-full max-w-[100vw] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
                   <table className="w-full min-w-max border-collapse">
                     <thead>
                       <tr>
@@ -2121,7 +2132,9 @@ function GenieAcs() {
     }
   }
 
-  // Summon satu ONU dari modal detail. Loading tetap sampai last_inform berubah, atau 35 detik.
+  // Summon satu ONU dari modal detail. Perangkat offline ditolak sebelum request.
+  // Bila GenieACS menerima (terkirim atau diantrekan), alert hijau ditampilkan,
+  // lalu data dimuat ulang sampai last_inform berubah atau 35 detik.
   async function handleSummonDevice(device) {
     if (!requireServer() || isSummoning) {
       return
@@ -2130,9 +2143,19 @@ function GenieAcs() {
     if (!id) {
       return
     }
+    if (deviceIsOffline(device)) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal',
+        text: 'Gagal: Perangkat sedang offline, tidak dapat melakukan summon.',
+      })
+      return
+    }
+    stopSummonWait()
     const previousInform = device.last_inform
     setIsSummoning(true)
     let baseline = previousInform
+    let accepted = null
     try {
       const result = await summonAcsDevices(selectedServer, [id])
       if (selectedDeviceIdRef.current !== id) {
@@ -2142,12 +2165,13 @@ function GenieAcs() {
       if (!result?.success) {
         setIsSummoning(false)
         Swal.fire({
-          icon: 'warning',
-          title: 'Summon',
+          icon: 'error',
+          title: 'Gagal',
           text: result?.message || 'Gagal menjalankan Summon.',
         })
         return
       }
+      accepted = result
     } catch (requestError) {
       if (selectedDeviceIdRef.current !== id) {
         setIsSummoning(false)
@@ -2162,6 +2186,18 @@ function GenieAcs() {
       setIsSummoning(false)
       return
     }
+
+    const acceptedText = accepted?.results?.length === 1
+      ? accepted.results[0].message
+      : accepted?.message
+    setIsSummoning(false)
+    Swal.fire({
+      icon: 'success',
+      title: 'Berhasil',
+      text: acceptedText || 'Summon berhasil.',
+      timer: 2200,
+      showConfirmButton: false,
+    })
 
     // Inform yang masuk saat modal baru dibuka (sebelum ONT menjawab Summon) bukan bukti respons.
     if (isNewerInform(lastInformRef.current, previousInform)) {
@@ -2179,17 +2215,14 @@ function GenieAcs() {
       wait.polling = true
       try {
         const fresh = await fetchDeviceDetail(id, { signal: controller.signal })
+        if (selectedDeviceIdRef.current !== id || summonWaitRef.current !== wait) {
+          return
+        }
         if (!wait.settled && isNewerInform(fresh?.last_inform, baseline) && stopSummonWait()) {
           setHostsReloadKey((key) => key + 1)
           setWlansReloadKey((key) => key + 1)
           setLanReloadKey((key) => key + 1)
           setWansReloadKey((key) => key + 1)
-          Swal.fire({
-            icon: 'success',
-            title: 'Sukses: ONT merespons!',
-            timer: 2200,
-            showConfirmButton: false,
-          })
         }
       } catch {
         // Dibatalkan atau ACS belum terjangkau. Polling berlanjut sampai batas waktu.
@@ -2201,8 +2234,8 @@ function GenieAcs() {
     poll()
     wait.intervalId = setInterval(poll, 3000)
     wait.timeoutId = setTimeout(() => {
-      if (stopSummonWait()) {
-        Swal.fire({ icon: 'error', title: 'Gagal: ONT tidak merespons panggilan (Timeout)' })
+      if (summonWaitRef.current === wait) {
+        stopSummonWait()
       }
     }, 35000)
   }
@@ -2339,6 +2372,17 @@ function GenieAcs() {
     }
 
     const ids = [...selected]
+    if (action.key === 'summon') {
+      const chosen = dataOnu.filter((item) => selected.has(item.id))
+      if (chosen.length > 0 && chosen.every((item) => deviceIsOffline(item))) {
+        Swal.fire({
+          icon: 'error',
+          title: 'Gagal',
+          text: 'Gagal: Perangkat sedang offline, tidak dapat melakukan summon.',
+        })
+        return
+      }
+    }
     const confirm = await Swal.fire({
       title: action.confirm.title,
       text: action.confirm.text(ids.length),

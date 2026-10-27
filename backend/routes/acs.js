@@ -19,6 +19,7 @@ const MAX_ACTION_IDS = 200;
 const ACTION_CONCURRENCY = 5;
 const INSERT_BATCH = 200;
 const FILTERS = ['all', 'online', 'off24', 'off24plus'];
+const SUMMON_OFFLINE_MESSAGE = 'Gagal: Perangkat sedang offline, tidak dapat melakukan summon.';
 const SEARCH_COLUMNS = [
   'username', 'ip_pppoe', 'ip_tr069', 'sn', 'pon', 'manufacturer',
   'tipe', 'ssid', 'device_id', 'tags',
@@ -655,13 +656,26 @@ function taskRoute(path, action, label) {
       }
       const results = await mapLimit(devices, ACTION_CONCURRENCY, async (device) => {
         try {
+          if (action === 'summon') {
+            const inform = await acs.readLastInform(server, device.device_id);
+            if (!inform) {
+              return { id: device.id, device_id: device.device_id, ok: false, message: 'Perangkat tidak ditemukan di GenieACS' };
+            }
+            if (!acs.isDeviceOnline(inform.lastInform)) {
+              return { id: device.id, device_id: device.device_id, ok: false, message: SUMMON_OFFLINE_MESSAGE };
+            }
+          }
           return { id: device.id, device_id: device.device_id, ok: true, message: await acs.sendTask(server, device, action) };
         } catch (taskError) {
           return { id: device.id, device_id: device.device_id, ok: false, message: taskError.message };
         }
       });
       logFailures(label, server, results);
-      return res.json(summarize(label, results));
+      const summary = summarize(label, results);
+      if (action === 'summon' && summary.berhasil === 0 && results.every((item) => item.message === SUMMON_OFFLINE_MESSAGE)) {
+        return fail(res, 409, results.length === 1 ? SUMMON_OFFLINE_MESSAGE : summary.message);
+      }
+      return res.json(summary);
     } catch (error) {
       return fail(res, 500, `Gagal menjalankan ${label}`, error);
     }

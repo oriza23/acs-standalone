@@ -324,6 +324,29 @@ function statusCutoffs(now = new Date()) {
   };
 }
 
+// ONLINE bila inform terakhir masih di dalam jendela ACS_ONLINE_MINUTES.
+function isDeviceOnline(lastInform, now = new Date()) {
+  const date = lastInform instanceof Date ? lastInform : toDate(lastInform);
+  if (!date || Number.isNaN(date.getTime())) {
+    return false;
+  }
+  return date.getTime() >= statusCutoffs(now).online.getTime();
+}
+
+// _lastInform langsung dari NBI. null bila perangkat tidak ada di GenieACS.
+async function readLastInform(server, deviceId) {
+  const query = new URLSearchParams({
+    query: JSON.stringify({ _id: deviceId }),
+    projection: '_id,_lastInform',
+  });
+  const { data } = await nbiRequest(server, 'GET', `/devices/?${query}`, { timeout: 8000 });
+  const doc = Array.isArray(data) ? data[0] : null;
+  if (!doc || doc._id === undefined || doc._id === null) {
+    return null;
+  }
+  return { lastInform: toDate(doc._lastInform) };
+}
+
 // ---- Tugas NBI -------------------------------------------------------------
 // ?connection_request: ACS langsung menghubungi ONU. Bila ONU tidak terjangkau
 // NBI membalas 202 dan task diantrikan sampai ONU inform berikutnya.
@@ -357,6 +380,10 @@ async function sendTask(server, deviceInput, action) {
     device.data_model = await detectDataModel(server, device.device_id);
   }
   const { status } = await postTask(server, device.device_id, taskBody(action, device));
+  if (action === 'summon') {
+    // 200 = connection request selesai, 202 = tugas masuk antrean GenieACS.
+    return status === 202 ? 'Summon berhasil diantrekan' : 'Summon berhasil dikirim';
+  }
   return status === 202 ? 'Diantrikan, ONU belum merespons' : 'Terkirim';
 }
 
@@ -465,6 +492,8 @@ module.exports = {
   fetchAllDevices,
   mapDevice,
   statusCutoffs,
+  isDeviceOnline,
+  readLastInform,
   sendTask,
   readWlanTarget,
   readLanTarget,
