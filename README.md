@@ -7,6 +7,9 @@ GenieACS sendiri (NBI, biasanya port 7557) dipasang terpisah. Setelah login, ala
 Ambil kode aplikasi sekali, lalu pilih salah satu cara pemasangan di bawah.
 
 ```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y curl git
 sudo mkdir -p /var/www
 sudo chown "$USER:$USER" /var/www
 git clone https://github.com/oriza23/acs-standalone.git /var/www/acs-standalone
