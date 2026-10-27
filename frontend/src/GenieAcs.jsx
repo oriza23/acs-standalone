@@ -642,6 +642,19 @@ function WanField({ label, value, mono = false }) {
 
 const wanButtonClass = 'cursor-pointer rounded border-0 px-3 py-1.5 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60'
 
+function SummonButton({ summoning, onSummon }) {
+  return (
+    <button
+      type="button"
+      className={`${wanButtonClass} bg-blue-600 hover:bg-blue-700`}
+      disabled={summoning}
+      onClick={onSummon}
+    >
+      {summoning ? 'Memanggil...' : 'Summon'}
+    </button>
+  )
+}
+
 const WAN_SERVICE_OPTIONS = ['INTERNET', 'TR069', 'VOIP', 'IPTV', 'OTHER']
 const WAN_CONNECTION_OPTIONS = ['IP_Routed', 'IP_Bridged', 'PPPoE_Bridged']
 const WAN_ADDRESSING_OPTIONS = ['DHCP', 'Static']
@@ -716,7 +729,7 @@ function optionsWithCurrent(options, value) {
   return [value, ...options]
 }
 
-function WanPanel({ wans, loading, error, onOverlayChange, setWanToDelete, deletingWanPath }) {
+function WanPanel({ wans, loading, error, onOverlayChange, setWanToDelete, deletingWanPath, onSummon, summoning }) {
   const [isWanPppOpen, setIsWanPppOpen] = useState(false)
   const [isWanIpOpen, setIsWanIpOpen] = useState(false)
   const [editingWanPath, setEditingWanPath] = useState(null)
@@ -764,7 +777,8 @@ function WanPanel({ wans, loading, error, onOverlayChange, setWanToDelete, delet
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap justify-end gap-2">
+      <div className="mb-4 flex w-full flex-wrap gap-2">
+        <SummonButton summoning={summoning} onSummon={onSummon} />
         <button type="button" className={`${wanButtonClass} bg-green-500 hover:bg-green-600`} onClick={() => openAddWan('ip')}>
           Add WAN IP
         </button>
@@ -1421,12 +1435,12 @@ function DeviceDetailModal({
       }}
     >
       <div
-        className="max-h-[90vh] w-full min-w-0 max-w-5xl overflow-x-hidden overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-slate-800"
+        className="flex max-h-[90vh] w-full min-w-0 max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-slate-800"
         role="dialog"
         aria-modal="true"
         aria-labelledby="acs-detail-title"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-4 sm:px-6 dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-4 sm:px-6 dark:border-slate-700 dark:bg-slate-800">
           <h2 id="acs-detail-title" className="m-0 min-w-0 break-words text-base font-bold tracking-wide text-gray-900 dark:text-gray-100">
             DETAIL PERANGKAT
           </h2>
@@ -1440,21 +1454,13 @@ function DeviceDetailModal({
           </button>
         </div>
 
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
         <div className="grid min-w-0 gap-6 p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <DetailIndicator label="REDAMAN ONU">{renderRx(device.rx_onu)}</DetailIndicator>
             <DetailIndicator label="TEMPERATURE">{renderTemp(device.temp)}</DetailIndicator>
             <DetailIndicator label="UPTIME">{formatUptime(device.uptime)}</DetailIndicator>
           </div>
-
-          <button
-            type="button"
-            className="w-full cursor-pointer rounded-md border-0 bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto md:justify-self-start"
-            disabled={summoning}
-            onClick={onSummon}
-          >
-            {summoning ? 'Memanggil...' : 'Summon'}
-          </button>
 
           <div className="grid grid-cols-1 gap-x-8 gap-y-2 md:grid-cols-3">
             <dl className="m-0">
@@ -1496,7 +1502,11 @@ function DeviceDetailModal({
 
             <div className="pt-4">
               {activeTab === 'TERHUBUNG' ? (
-                <div className="w-full max-w-[100vw] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
+                <div>
+                  <div className="mb-3 flex w-full gap-2">
+                    <SummonButton summoning={summoning} onSummon={onSummon} />
+                  </div>
+                  <div className="w-full max-w-[100vw] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
                   <table className="w-full min-w-max border-collapse">
                     <thead>
                       <tr>
@@ -1527,9 +1537,14 @@ function DeviceDetailModal({
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               ) : activeTab === 'WLAN' ? (
-                <div className="w-full max-w-[100vw] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
+                <div>
+                  <div className="mb-3 flex w-full gap-2">
+                    <SummonButton summoning={summoning} onSummon={onSummon} />
+                  </div>
+                  <div className="w-full max-w-[100vw] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
                   <table className="w-full min-w-max border-collapse">
                     <thead>
                       <tr>
@@ -1573,13 +1588,15 @@ function DeviceDetailModal({
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               ) : activeTab === 'LAN' ? (
                 <div>
-                  <div className="mb-4 flex justify-end">
+                  <div className="mb-3 flex w-full flex-wrap gap-2">
+                    <SummonButton summoning={summoning} onSummon={onSummon} />
                     <button
                       type="button"
-                      className="inline-flex cursor-pointer items-center gap-1.5 rounded border-0 bg-emerald-500 px-3 py-1 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded border-0 bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
                       onClick={onEditLan}
                     >
                       <Pencil size={14} /> Edit LAN
@@ -1640,6 +1657,8 @@ function DeviceDetailModal({
                   onOverlayChange={setWanOverlayOpen}
                   setWanToDelete={setWanToDelete}
                   deletingWanPath={deletingWanPath}
+                  onSummon={onSummon}
+                  summoning={summoning}
                 />
               ) : (
                 <p className="m-0 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -1648,6 +1667,7 @@ function DeviceDetailModal({
               )}
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>
