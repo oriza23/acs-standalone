@@ -23,7 +23,7 @@ Struktur folder:
 
 `install.sh` menanyakan nama database, username, dan password. Nilai bawaan bila Enter ditekan adalah `acs_db` dan `oriza`. Password yang dikosongkan dibuat otomatis.
 
-Script kemudian memasang curl, Git, MariaDB, dan Node.js 22, membuat database beserta hak aksesnya, menulis `.env`, menjalankan `npm install` di backend dan frontend, membangun frontend, mendaftarkan kedua layanan ke PM2, menyimpan proses agar hidup lagi setelah reboot, dan membuka port **5001** serta **5174** di UFW.
+Script kemudian memasang curl, Git, MariaDB, dan Node.js 22, membuat database beserta hak aksesnya, menulis `.env`, menjalankan `npm install` di backend dan frontend, membangun frontend, mendaftarkan kedua layanan ke PM2, menyimpan proses agar hidup lagi setelah reboot, dan membuka port **5001**, **5174**, serta port GenieACS **3000**, **7547**, **7557**, dan **7567** di UFW.
 
 Dari folder proyek:
 
@@ -229,17 +229,21 @@ pm2 status
 
 ### 8. Firewall
 
-Jika UFW dipakai, buka port web dan API:
+Jika UFW dipakai, buka port web, API, dan GenieACS:
 
 ```bash
 sudo ufw allow OpenSSH
 sudo ufw allow 5174/tcp
 sudo ufw allow 5001/tcp
+sudo ufw allow 3000/tcp
+sudo ufw allow 7547/tcp
+sudo ufw allow 7557/tcp
+sudo ufw allow 7567/tcp
 sudo ufw enable
 sudo ufw status
 ```
 
-Port MariaDB `3306` tetap tertutup dari luar. Aplikasi hanya terhubung ke `localhost`.
+Port **3000** adalah antarmuka GenieACS, **7547** adalah CWMP, **7557** adalah NBI, dan **7567** adalah file server. Port MariaDB `3306` tetap tertutup dari luar. Aplikasi hanya terhubung ke `localhost`.
 
 ## Cara Memperbarui Aplikasi (Update)
 
@@ -281,12 +285,16 @@ Contoh: `http://192.168.69.70:5174` di jaringan lokal, atau `http://203.0.113.10
 
 Backend tetap di port **5001**. Browser memanggil API ke `http://<IP_SERVER_UBUNTU>:5001`, sesuai `VITE_API_URL` saat build.
 
-Kedua port itu harus berstatus terbuka di firewall UFW, kalau tidak halaman web atau login gagal terhubung:
+Port aplikasi dan GenieACS harus berstatus terbuka di firewall UFW, kalau tidak halaman web, login, atau GenieACS gagal terhubung:
 
 ```bash
 sudo ufw allow 5174/tcp
 sudo ufw allow 5001/tcp
+sudo ufw allow 3000/tcp
+sudo ufw allow 7547/tcp
+sudo ufw allow 7557/tcp
+sudo ufw allow 7567/tcp
 sudo ufw status
 ```
 
-Pada daftar UFW, `5174/tcp` dan `5001/tcp` tampil sebagai `ALLOW`. Pemasangan UFW ada di bagian Firewall pada Opsi 2. Opsi 1 sudah membuka kedua port itu.
+Pada daftar UFW, port itu tampil sebagai `ALLOW`. Pemasangan UFW ada di bagian Firewall pada Opsi 2. Opsi 1 sudah membuka port yang sama.

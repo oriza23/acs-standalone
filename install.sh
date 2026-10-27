@@ -143,10 +143,14 @@ pm2 save
 $SUDO env PATH="$PATH:/usr/bin" pm2 startup systemd -u "$APP_USER" --hp "$APP_HOME"
 pm2 save
 
-echo -e "${YELLOW}Membuka port ${BACKEND_PORT} dan ${FRONTEND_PORT} di UFW...${NC}"
+echo -e "${YELLOW}Membuka port aplikasi dan GenieACS di UFW...${NC}"
 $SUDO ufw allow OpenSSH
 $SUDO ufw allow "${FRONTEND_PORT}/tcp"
 $SUDO ufw allow "${BACKEND_PORT}/tcp"
+$SUDO ufw allow 3000/tcp
+$SUDO ufw allow 7547/tcp
+$SUDO ufw allow 7557/tcp
+$SUDO ufw allow 7567/tcp
 $SUDO ufw --force enable
 
 echo
