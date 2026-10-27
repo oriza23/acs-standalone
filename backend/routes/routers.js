@@ -8,6 +8,20 @@ const {
 const router = express.Router();
 const requireAdmin = requireRole('admin');
 
+async function ensureTable() {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS routers (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      nama_router VARCHAR(100) NOT NULL,
+      ip_address VARCHAR(50) NOT NULL,
+      secret VARCHAR(100) NOT NULL,
+      deskripsi TEXT,
+      status VARCHAR(20) DEFAULT 'Aktif',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`,
+  );
+}
+
 function readText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -28,6 +42,7 @@ function readRouterBody(body) {
 
 router.get('/', async (req, res) => {
   try {
+    await ensureTable();
     const [rows] = await pool.execute(
       'SELECT id, nama_router, ip_address, secret, deskripsi, status, created_at FROM routers ORDER BY id DESC',
     );

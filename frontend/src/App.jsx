@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { hasValidToken } from './api/auth.js'
 import AccountSettings from './AccountSettings.jsx'
+import AppShell from './AppShell.jsx'
 import Dashboard from './Dashboard.jsx'
 import GenieAcs from './GenieAcs.jsx'
 import Login from './Login.jsx'
@@ -21,11 +22,10 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route element={<ProtectedRoute />}>
-          <Route path="/acs" element={<Dashboard />}>
-            <Route index element={<GenieAcs />} />
-          </Route>
-          <Route path="/akun" element={<Dashboard />}>
-            <Route index element={<AccountSettings />} />
+          <Route element={<AppShell />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/acs" element={<GenieAcs />} />
+            <Route path="/akun" element={<AccountSettings />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

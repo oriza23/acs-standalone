@@ -1,6 +1,7 @@
 const path = require('path');
 require('./backend/load_env')(path.join(__dirname, '.env'));
 
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const pool = require('./database');
@@ -8,6 +9,7 @@ const requireAuth = require('./backend/middleware/auth');
 const adminsRouter = require('./backend/routes/admins');
 const ensureBootstrapAdmin = require('./backend/bootstrap_admin');
 const { ensureTables: ensureAcsTables } = require('./backend/acs');
+const { attachMikrotikMonitor } = require('./backend/mikrotik_socket');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5001;
@@ -24,23 +26,25 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', require('./backend/routes/auth'));
 app.use('/api', requireAuth);
 app.use('/api/acs', require('./backend/routes/acs'));
+app.use('/api/routers', require('./backend/routes/routers'));
+app.use('/api/mikrotik', require('./backend/routes/mikrotik'));
 app.use('/api/admins', adminsRouter);
 app.use('/api/admin', adminsRouter);
 
 async function start() {
   await ensureBootstrapAdmin(pool);
   await ensureAcsTables();
-  // Express 5 mengirim error bind (mis. EADDRINUSE) ke callback listen. Tanpa pengecekan ini,
-  // server kedua tetap mencetak "berjalan" padahal port dipakai proses lama.
-  app.listen(PORT, (error) => {
-    if (error) {
-      console.error(
-        error.code === 'EADDRINUSE'
-          ? `Port ${PORT} sudah dipakai proses lain. Hentikan proses lama dulu: fuser -k ${PORT}/tcp`
-          : `Gagal membuka port ${PORT}: ${error.message}`,
-      );
-      process.exit(1);
-    }
+  const server = http.createServer(app);
+  attachMikrotikMonitor(server);
+  server.on('error', (error) => {
+    console.error(
+      error.code === 'EADDRINUSE'
+        ? `Port ${PORT} sudah dipakai proses lain. Hentikan proses lama dulu: fuser -k ${PORT}/tcp`
+        : `Gagal membuka port ${PORT}: ${error.message}`,
+    );
+    process.exit(1);
+  });
+  server.listen(PORT, () => {
     console.log(`Server berjalan di http://localhost:${PORT}`);
   });
 }
