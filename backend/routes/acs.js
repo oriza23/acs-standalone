@@ -414,6 +414,22 @@ router.post('/delete-wan', requireAdmin, async (req, res) => {
   }
 });
 
+async function rollbackNewWan(server, deviceId, rollbackPath, label) {
+  try {
+    await acs.sendWanDeleteObject(server, deviceId, rollbackPath, { rollback: true });
+    console.log(`[ACS ${label}] rollback ${deviceId} ${rollbackPath}`);
+    return { removed: true, note: '' };
+  } catch (rollbackError) {
+    const timedOut = rollbackError?.code === 'TIMEOUT' || rollbackError?.code === 'PENDING';
+    if (timedOut) {
+      console.warn(`[ACS ${label}] rollback ${deviceId} ${rollbackPath} diabaikan karena timeout`);
+      return { removed: false, note: '' };
+    }
+    console.warn(`[ACS ${label}] rollback ${deviceId} ${rollbackPath}: ${rollbackError.message}`);
+    return { removed: false, note: ` Instance baru gagal dihapus (${rollbackError.message}).` };
+  }
+}
+
 async function pushWanBatch(server, deviceId, parameterValues) {
   if (!parameterValues || parameterValues.length === 0) {
     return { applied: true };
@@ -539,14 +555,12 @@ router.post('/wan-ppp', requireAdmin, async (req, res) => {
     let rollbackNote = '';
     let leftoverPath = null;
     if (server && rollbackPath && !values.wanPath) {
-      try {
-        await acs.sendWanDeleteObject(server, values.deviceId, rollbackPath);
-        console.log(`[ACS wan-ppp] rollback ${values.deviceId} ${rollbackPath}`);
+      const rollback = await rollbackNewWan(server, values.deviceId, rollbackPath, 'wan-ppp');
+      rollbackNote = rollback.note;
+      if (rollback.removed) {
         pppPath = null;
-      } catch (rollbackError) {
+      } else {
         leftoverPath = pppPath;
-        rollbackNote = ` Instance baru gagal dihapus (${rollbackError.message}).`;
-        console.error(`[ACS wan-ppp] rollback ${values.deviceId} ${rollbackPath}: ${rollbackError.message}`);
       }
     }
     const isNbiError = error instanceof acs.NbiError;
@@ -644,14 +658,12 @@ async function saveWanIp(req, res) {
     let rollbackNote = '';
     let leftoverPath = null;
     if (server && rollbackPath && !values.wanPath) {
-      try {
-        await acs.sendWanDeleteObject(server, values.deviceId, rollbackPath);
-        console.log(`[ACS wan-ip] rollback ${values.deviceId} ${rollbackPath}`);
+      const rollback = await rollbackNewWan(server, values.deviceId, rollbackPath, 'wan-ip');
+      rollbackNote = rollback.note;
+      if (rollback.removed) {
         ipPath = null;
-      } catch (rollbackError) {
+      } else {
         leftoverPath = ipPath;
-        rollbackNote = ` Instance baru gagal dihapus (${rollbackError.message}).`;
-        console.error(`[ACS wan-ip] rollback ${values.deviceId} ${rollbackPath}: ${rollbackError.message}`);
       }
     }
     const isNbiError = error instanceof acs.NbiError;

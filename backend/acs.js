@@ -414,15 +414,19 @@ async function postTask(server, deviceId, body) {
   return result;
 }
 
-// Tugas WAN PPP menunggu sesi TR-069 lebih lama daripada Summon biasa.
+// Tugas WAN menunggu sesi TR-069 lebih lama daripada Summon biasa.
 // GenieACS ?timeout= dalam milidetik: bila ONU belum selesai, NBI membalas 202 dan task tetap antre.
-const WAN_TASK_TIMEOUT_MS = 30000;
-const WAN_HTTP_TIMEOUT_MS = 35000;
-const WAN_WAKE_TIMEOUT_MS = 10000;
-const WAN_WAKE_HTTP_TIMEOUT_MS = 15000;
-const WAN_WAKE_DELAY_MS = 2500;
-const WAN_POLL_INTERVAL_MS = 2000;
-const WAN_POLL_BUDGET_MS = 30000;
+// HTTP harus lebih panjang dari timeout GenieACS agar ID tugas tidak hilang saat koneksi diputus.
+const WAN_TASK_TIMEOUT_MS = 60000;
+const WAN_HTTP_TIMEOUT_MS = 70000;
+const WAN_WAKE_TIMEOUT_MS = 20000;
+const WAN_WAKE_HTTP_TIMEOUT_MS = 25000;
+const WAN_WAKE_DELAY_MS = 1500;
+const WAN_POLL_INTERVAL_MS = 3000;
+const WAN_POLL_BUDGET_MS = 60000;
+const WAN_ROLLBACK_TASK_TIMEOUT_MS = 20000;
+const WAN_ROLLBACK_HTTP_TIMEOUT_MS = 25000;
+const WAN_ROLLBACK_POLL_BUDGET_MS = 20000;
 
 function delay(ms) {
   return new Promise((resolve) => {
@@ -447,7 +451,7 @@ async function fetchQueuedTask(server, taskId) {
   const query = new URLSearchParams({
     query: JSON.stringify({ _id: taskId }),
   });
-  const { data } = await nbiRequest(server, 'GET', `/tasks/?${query}`, { timeout: 8000 });
+  const { data } = await nbiRequest(server, 'GET', `/tasks/?${query}`, { timeout: 20000 });
   return Array.isArray(data) && data.length > 0 ? data[0] : null;
 }
 
@@ -473,12 +477,29 @@ async function recentDeviceFault(server, deviceId) {
   }
 }
 
-// Task 202 belum selesai. Dipantau sampai hilang dari antrean (sukses), membawa fault, atau batas waktu.
-async function pollWanTask(server, deviceId, taskId) {
-  const deadline = Date.now() + WAN_POLL_BUDGET_MS;
+function sessionModel(body) {
+  if (String(body?.objectName || '').startsWith('Device.')) {
+    return 'Device';
+  }
+  const rows = Array.isArray(body?.parameterValues) ? body.parameterValues : [];
+  if (rows.some((row) => String(row?.[0] || '').startsWith('Device.'))) {
+    return 'Device';
+  }
+  return 'InternetGatewayDevice';
+}
+
+// Task 202 belum selesai. Dicek tiap 3 detik sampai 60 detik: hilang dari antrean, membawa fault, atau waktu habis.
+async function pollWanTask(server, deviceId, taskId, budgetMs = WAN_POLL_BUDGET_MS) {
+  const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     await delay(WAN_POLL_INTERVAL_MS);
-    const task = await fetchQueuedTask(server, taskId);
+    let task = null;
+    try {
+      task = await fetchQueuedTask(server, taskId);
+    } catch (error) {
+      console.warn(`[ACS wan] cek task ${taskId}: ${error.message}`);
+      continue;
+    }
     if (!task) {
       return null;
     }
@@ -497,8 +518,17 @@ async function pollWanTask(server, deviceId, taskId) {
   );
 }
 
-// POST task WAN dengan connection request, timeout 30 detik, lalu polling bila masih 202.
-async function postWanTask(server, deviceId, body, { genieTimeout = WAN_TASK_TIMEOUT_MS, httpTimeout = WAN_HTTP_TIMEOUT_MS, poll = true } = {}) {
+// POST task WAN dengan connection request. AddObject dan setParameterValues membangunkan ONU lebih dulu.
+async function postWanTask(server, deviceId, body, {
+  genieTimeout = WAN_TASK_TIMEOUT_MS,
+  httpTimeout = WAN_HTTP_TIMEOUT_MS,
+  poll = true,
+  pollBudget = WAN_POLL_BUDGET_MS,
+  summon = true,
+} = {}) {
+  if (summon && (body?.name === 'addObject' || body?.name === 'setParameterValues')) {
+    await prepareWanPpp(server, deviceId, sessionModel(body));
+  }
   const path = `/devices/${encodeURIComponent(deviceId)}/tasks?timeout=${genieTimeout}&connection_request`;
   let result;
   try {
@@ -528,7 +558,7 @@ async function postWanTask(server, deviceId, body, { genieTimeout = WAN_TASK_TIM
     if (!taskId) {
       throw new NbiError('GenieACS mengantrikan perintah tanpa ID task, sehingga statusnya tidak bisa dipantau.', undefined, 'PENDING');
     }
-    const polled = await pollWanTask(server, deviceId, String(taskId));
+    const polled = await pollWanTask(server, deviceId, String(taskId), pollBudget);
     return { status: 200, data: polled };
   }
   return result;
@@ -542,7 +572,7 @@ async function prepareWanPpp(server, deviceId, model) {
       server,
       deviceId,
       { name: 'refreshObject', objectName },
-      { genieTimeout: WAN_WAKE_TIMEOUT_MS, httpTimeout: WAN_WAKE_HTTP_TIMEOUT_MS, poll: false },
+      { genieTimeout: WAN_WAKE_TIMEOUT_MS, httpTimeout: WAN_WAKE_HTTP_TIMEOUT_MS, poll: false, summon: false },
     );
   } catch (error) {
     const unreachable = error instanceof NbiError && (error.status === 404 || (!error.status && !error.code));
@@ -884,10 +914,22 @@ async function createWanIpInstance(server, deviceId, options) {
 
 // Menghapus satu instance objek TR-069 (DeleteObject). Titik di akhir path dibuang.
 // Hasil: { applied: true } bila ONU sudah menghapus, { applied: false } bila hanya diantrikan.
-async function sendWanDeleteObject(server, deviceId, objectName) {
+async function sendWanDeleteObject(server, deviceId, objectName, { rollback = false } = {}) {
   const objectPath = normalizeAcsObjectName(objectName);
   console.log('DELETEOBJECT TR-069:', objectPath);
-  await postWanTask(server, deviceId, { name: 'deleteObject', objectName: objectPath });
+  await postWanTask(
+    server,
+    deviceId,
+    { name: 'deleteObject', objectName: objectPath },
+    rollback
+      ? {
+        genieTimeout: WAN_ROLLBACK_TASK_TIMEOUT_MS,
+        httpTimeout: WAN_ROLLBACK_HTTP_TIMEOUT_MS,
+        pollBudget: WAN_ROLLBACK_POLL_BUDGET_MS,
+        summon: false,
+      }
+      : {},
+  );
   return { applied: true };
 }
 
