@@ -176,11 +176,12 @@ function AccountSettings() {
       return
     }
     const result = await Swal.fire({
-      title: 'Apakah Anda yakin ingin menghapus admin ini?',
+      text: '⚠️ Apakah Anda yakin ingin menghapus admin ini? Tindakan ini tidak dapat dibatalkan.',
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonText: 'Hapus',
+      confirmButtonText: 'Setuju',
       cancelButtonText: 'Batal',
+      confirmButtonColor: '#e11d48',
     })
     if (!result.isConfirmed) {
       return
