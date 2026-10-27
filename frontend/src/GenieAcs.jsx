@@ -304,21 +304,46 @@ function formatUptime(seconds) {
 const RX_NORMAL_MIN = -40
 const RX_NORMAL_MAX = -10
 
+const IPV4_LINK = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/
+const IP_LINK_CLASS = 'cursor-pointer text-blue-600 hover:text-blue-800 hover:underline dark:text-blue-400 dark:hover:text-blue-300'
+
 function IpLink({ ip }) {
-  if (!ip || ip === '-') {
-    return '-'
+  const text = String(ip ?? '').trim()
+  if (!IPV4_LINK.test(text) || text === '0.0.0.0') {
+    return text && text !== '-' ? text : '-'
   }
   return (
     <a
-      href={'http://' + ip}
+      href={`http://${text}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+      className={IP_LINK_CLASS}
       onClick={(event) => event.stopPropagation()}
     >
-      {ip}
+      {text}
     </a>
   )
+}
+
+function IpText({ value }) {
+  const text = String(value ?? '').trim()
+  if (!text || text === '-') {
+    return '-'
+  }
+  const parts = text.split(/[,;\s]+/).filter(Boolean)
+  const addresses = parts.filter((part) => IPV4_LINK.test(part) && part !== '0.0.0.0')
+  if (addresses.length === 0) {
+    return text
+  }
+  if (addresses.length === parts.length && parts.length === 1) {
+    return <IpLink ip={parts[0]} />
+  }
+  return parts.map((part, index) => (
+    <span key={`${part}-${index}`}>
+      {index > 0 ? ', ' : ''}
+      {IPV4_LINK.test(part) && part !== '0.0.0.0' ? <IpLink ip={part} /> : part}
+    </span>
+  ))
 }
 
 function informMillis(value) {
@@ -631,11 +656,43 @@ function wanStatusClass(status) {
   return value === 'connected' || value === 'up' ? 'text-green-600' : 'text-red-500'
 }
 
-function WanField({ label, value, mono = false }) {
+const WAN_SERVICE_VALUE_CLASS = 'font-medium text-green-600 dark:text-green-400'
+const WAN_TRIGGER_VALUE_CLASS = 'font-medium text-blue-600 dark:text-blue-400'
+const WAN_UPTIME_VALUE_CLASS = 'font-medium text-red-500 dark:text-red-400'
+const WAN_CONN_TYPE_VALUE_CLASS = 'font-semibold text-gray-800 dark:text-gray-200'
+
+function wanAccentClass(value, className) {
+  const text = String(value ?? '').trim()
+  return text && text !== '-' ? className : ''
+}
+
+function wanStateValue(value) {
+  const raw = value === true ? 'true' : value === false ? 'false' : String(value ?? '').trim()
+  const normalized = raw.toLowerCase()
+  if (!raw || raw === '-') {
+    return { text: '-', valueClass: 'font-medium text-gray-500 dark:text-gray-400' }
+  }
+  if (normalized === 'enabled' || normalized === 'true' || normalized === 'connected' || normalized === 'up') {
+    return {
+      text: normalized === 'true' || normalized === 'enabled' ? 'Enabled' : raw,
+      valueClass: 'font-medium text-green-600 dark:text-green-400',
+    }
+  }
+  if (normalized === 'disabled' || normalized === 'false' || normalized === 'disconnected' || normalized === 'down') {
+    return {
+      text: normalized === 'false' || normalized === 'disabled' ? 'Disabled' : raw,
+      valueClass: 'font-medium text-red-500 dark:text-red-400',
+    }
+  }
+  return { text: raw, valueClass: 'font-medium text-gray-500 dark:text-gray-400' }
+}
+
+function WanField({ label, value, mono = false, valueClass = '' }) {
+  const tone = valueClass || 'font-semibold text-slate-800 dark:text-gray-100'
   return (
     <div className="min-w-0">
       <p className="m-0 text-xs text-gray-500 dark:text-gray-400">{label}</p>
-      <p className={`m-0 mt-1 break-words font-semibold text-slate-800 dark:text-gray-100 ${mono ? 'font-mono text-xs' : 'text-sm'}`}>
+      <p className={`m-0 mt-1 break-words ${mono ? 'font-mono text-xs' : 'text-sm'} ${tone}`}>
         {value || '-'}
       </p>
     </div>
@@ -893,7 +950,12 @@ function WanPanel({
       </div>
 
       {hasWans ? (
-        wans.map((wan) => (
+        wans.map((wan) => {
+          const statusValue = wanStateValue(wan.status)
+          const vlanValue = wanStateValue(wan.vlanStatus)
+          const natValue = wanStateValue(wan.nat)
+          const uptimeText = formatUptime(wan.uptime)
+          return (
           <article key={wan.id} className="mb-4 overflow-hidden rounded border border-gray-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-900">
             <header className="flex flex-wrap items-center justify-between gap-2 bg-cyan-500 px-4 py-2 text-white">
               <div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -924,33 +986,34 @@ function WanPanel({
             </header>
             <div className="grid grid-cols-1 gap-4 p-4 text-sm md:grid-cols-4">
               <div className="grid gap-3">
-                <WanField label="Status" value={wan.status} />
-                <WanField label="IPAddress" value={wan.ip} />
+                <WanField label="Status" value={statusValue.text} valueClass={statusValue.valueClass} />
+                <WanField label="IPAddress" value={<IpLink ip={wan.ip} />} />
                 <WanField label="Username" value={wan.username} />
-                <WanField label="VLANStatus" value={wan.vlanStatus} />
+                <WanField label="VLANStatus" value={vlanValue.text} valueClass={vlanValue.valueClass} />
               </div>
               <div className="grid gap-3">
                 <WanField label="ConnName" value={wan.name} />
-                <WanField label="RemoteAddress" value={wan.remoteIp} />
+                <WanField label="RemoteAddress" value={<IpText value={wan.remoteIp} />} />
                 <WanField label="Password" value={wan.password} />
                 <WanField label="VLANID" value={wan.vlanId} />
               </div>
               <div className="grid gap-3">
-                <WanField label="Service" value={wan.service} />
-                <WanField label="DNSServer" value={wan.dns} />
-                <WanField label="ConnectionTrigger" value={wan.connTrigger} />
-                <WanField label="NAT" value={wan.nat} />
+                <WanField label="Service" value={wan.service} valueClass={wanAccentClass(wan.service, WAN_SERVICE_VALUE_CLASS)} />
+                <WanField label="DNSServer" value={<IpText value={wan.dns} />} />
+                <WanField label="ConnectionTrigger" value={wan.connTrigger} valueClass={wanAccentClass(wan.connTrigger, WAN_TRIGGER_VALUE_CLASS)} />
+                <WanField label="NAT" value={natValue.text} valueClass={natValue.valueClass} />
               </div>
               <div className="grid gap-3">
                 <WanField label="TransportType" value={wan.transport} />
                 <WanField label="MACAddress" value={wan.mac} mono />
-                <WanField label="ConnType" value={wan.connType} />
-                <WanField label="Uptime" value={formatUptime(wan.uptime)} />
+                <WanField label="ConnType" value={wan.connType} valueClass={wanAccentClass(wan.connType, WAN_CONN_TYPE_VALUE_CLASS)} />
+                <WanField label="Uptime" value={uptimeText} valueClass={wanAccentClass(uptimeText, WAN_UPTIME_VALUE_CLASS)} />
               </div>
             </div>
             <WanBindingStatus boundPorts={wan.boundPorts} ssidCount={ssidCount} />
           </article>
-        ))
+          )
+        })
       ) : (
         <p className="m-0 rounded-lg border border-gray-200 py-10 text-center text-sm text-gray-500 dark:border-slate-700 dark:text-gray-400">
           {loading && 'Memuat koneksi WAN...'}
@@ -1822,7 +1885,7 @@ function DeviceDetailModal({
                           <tr key={`${host.mac}-${host.ip}-${index}`} className="border-b border-gray-100 last:border-b-0 dark:border-slate-700">
                             <td className={tdClass}>{index + 1}</td>
                             <td className={`${tdClass} font-semibold`}>{host.hostname}</td>
-                            <td className={tdClass}>{host.ip}</td>
+                            <td className={tdClass}><IpLink ip={host.ip} /></td>
                             <td className={`${tdClass} font-mono text-xs`}>{host.mac}</td>
                             <td className={tdClass}>{host.type}</td>
                           </tr>
@@ -1907,7 +1970,7 @@ function DeviceDetailModal({
                   {lan ? (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <LanCard icon={Server} iconClass="text-blue-600 dark:text-blue-400" title="IP GATEWAY">
-                        <LanRow label="IP Gateway">{lan.ip || '-'}</LanRow>
+                        <LanRow label="IP Gateway"><IpLink ip={lan.ip} /></LanRow>
                         <LanRow label="Subnet Mask">{lan.subnet || '-'}</LanRow>
                         <LanRow label="MAC Address"><span className="font-mono text-xs">{lan.mac || '-'}</span></LanRow>
                       </LanCard>
@@ -1936,7 +1999,7 @@ function DeviceDetailModal({
                           {[0, 1, 2].map((index) => (
                             <div key={index}>
                               <p className="m-0 text-xs text-gray-500 dark:text-gray-400">DNS Server {index + 1}</p>
-                              <p className="m-0 mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{lan.dns?.[index] || '-'}</p>
+                              <p className="m-0 mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100"><IpLink ip={lan.dns?.[index]} /></p>
                             </div>
                           ))}
                         </div>
