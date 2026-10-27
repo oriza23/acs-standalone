@@ -9,12 +9,50 @@ const { hashBcrypt, hashPassword, isBcryptHash, isScryptHash, verifyBcrypt, veri
 const router = express.Router();
 const requireAdmin = requireRole('admin');
 const UPDATE_SCRIPT = '/var/www/acs-standalone/update.sh';
+const GITHUB_REPO_API = 'https://api.github.com/repos/oriza23/acs-standalone';
+const REPO_LOCKED_MESSAGE = 'Gagal: Repositori terkunci (Privat), tidak bisa melakukan update aplikasi.';
 
-router.post('/system-update', requireAdmin, (req, res) => {
+// 200 = repo publik. 401/404 = privat atau tidak ditemukan (GitHub menyembunyikan repo privat).
+async function readGithubRepoStatus() {
+  const response = await fetch(GITHUB_REPO_API, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'acs-standalone',
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  return response.status;
+}
+
+router.post('/system-update', requireAdmin, async (req, res) => {
   if (!fs.existsSync(UPDATE_SCRIPT)) {
     return res.status(500).json({
       success: false,
       message: 'Berkas update.sh tidak ditemukan',
+    });
+  }
+
+  let repoStatus;
+  try {
+    repoStatus = await readGithubRepoStatus();
+  } catch (error) {
+    console.error('[system-update] Gagal menghubungi GitHub:', error.message);
+    return res.status(502).json({
+      success: false,
+      message: 'Gagal memeriksa status repositori GitHub',
+    });
+  }
+
+  if (repoStatus === 404 || repoStatus === 401) {
+    return res.status(403).json({
+      success: false,
+      message: REPO_LOCKED_MESSAGE,
+    });
+  }
+  if (repoStatus !== 200) {
+    return res.status(502).json({
+      success: false,
+      message: 'Gagal memeriksa status repositori GitHub',
     });
   }
 

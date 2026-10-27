@@ -55,9 +55,11 @@ function AccountSettings() {
   const [passwordForm, setPasswordForm] = useState({ old_password: '', new_password: '', confirm_password: '' })
   const [createState, setCreateState] = useState({ loading: false, error: '', ok: '' })
   const [passwordState, setPasswordState] = useState({ loading: false, error: '', ok: '' })
-  const [updating, setUpdating] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [alertStatus, setAlertStatus] = useState(null)
   const [updateError, setUpdateError] = useState('')
   const updateTimer = useRef(null)
+  const successTimer = useRef(null)
   const storedUserId = getUserId()
   const currentUserId = storedUserId ?? admins.find((row) => isCurrentUser(row.username, username))?.id ?? null
 
@@ -84,6 +86,9 @@ function AccountSettings() {
     return () => {
       if (updateTimer.current) {
         clearInterval(updateTimer.current)
+      }
+      if (successTimer.current) {
+        clearTimeout(successTimer.current)
       }
     }
   }, [loadAdmins])
@@ -212,11 +217,12 @@ function AccountSettings() {
       return
     }
 
-    setUpdating(true)
+    setIsUpdating(true)
+    setAlertStatus('loading')
     setUpdateError('')
     let previousBoot = null
     try {
-      const health = await api.get('/api/health')
+      const health = await api.get('/api/health', { timeout: 4000 })
       previousBoot = health.data?.startedAt ?? null
     } catch {
       previousBoot = null
@@ -227,7 +233,8 @@ function AccountSettings() {
       await api.post('/api/admin/system-update')
     } catch (error) {
       if (error.response) {
-        setUpdating(false)
+        setIsUpdating(false)
+        setAlertStatus('error')
         setUpdateError(errorMessage(error, 'Gagal memulai pembaruan'))
         return
       }
@@ -235,26 +242,38 @@ function AccountSettings() {
     }
 
     let polls = 0
+    let polling = false
     updateTimer.current = setInterval(async () => {
+      if (polling) {
+        return
+      }
+      polling = true
       polls += 1
       try {
-        const ping = await api.get('/api/health')
+        const ping = await api.get('/api/health', { timeout: 4000 })
         const boot = ping.data?.startedAt
         const restarted = previousBoot != null
           ? Boolean(boot) && boot !== previousBoot
           : sawOutage && Boolean(boot)
         if (restarted) {
           clearInterval(updateTimer.current)
-          await Swal.fire({ icon: 'success', title: 'Update Berhasil' })
-          window.location.reload()
+          setIsUpdating(false)
+          setAlertStatus('success')
+          successTimer.current = setTimeout(() => {
+            setAlertStatus(null)
+            window.location.reload()
+          }, 4000)
           return
         }
       } catch {
         sawOutage = true
+      } finally {
+        polling = false
       }
       if (polls >= 200) {
         clearInterval(updateTimer.current)
-        setUpdating(false)
+        setIsUpdating(false)
+        setAlertStatus('error')
         setUpdateError('Pembaruan belum selesai. Periksa server, lalu muat ulang halaman.')
       }
     }, 3000)
@@ -423,16 +442,49 @@ function AccountSettings() {
         <p className="mt-1 mb-0 text-sm text-rose-700 dark:text-rose-300">
           Mengunduh kode terbaru dari GitHub, lalu me-restart backend dan frontend. Halaman tidak bisa dipakai selama proses ini.
         </p>
-        {updateError && <div className="mt-4"><Notice>{updateError}</Notice></div>}
         <button
           type="button"
-          className="mt-4 h-12 cursor-pointer rounded-xl border-2 border-rose-600 bg-transparent px-4 text-[15px] font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-wait disabled:opacity-70 dark:text-rose-200 dark:hover:bg-rose-900"
+          className="mt-4 h-12 cursor-pointer rounded-xl border-2 border-rose-600 bg-transparent px-4 text-[15px] font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70 dark:text-rose-200 dark:hover:bg-rose-900"
           onClick={handleSystemUpdate}
-          disabled={updating}
+          disabled={isUpdating}
         >
-          {updating ? 'Sedang memperbarui... Harap tunggu' : 'Update Sistem ke Versi Terbaru'}
+          {isUpdating ? 'Sedang memperbarui... Harap tunggu' : 'Update Sistem ke Versi Terbaru'}
         </button>
       </section>
+
+      {alertStatus === 'loading' && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" role="alertdialog" aria-busy="true" aria-live="polite">
+          <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-xl dark:bg-gray-800">
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-cyan-200 border-t-cyan-700" />
+            <p className="mt-4 mb-0 text-sm font-bold text-gray-900 dark:text-gray-100">
+              Sedang mengunduh pembaruan dan me-restart server...
+            </p>
+          </div>
+        </div>
+      )}
+
+      {alertStatus === 'error' && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" role="alertdialog" aria-live="assertive">
+          <div className="w-full max-w-md rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center shadow-xl dark:border-rose-900 dark:bg-rose-950">
+            <p className="m-0 text-sm font-bold text-rose-800 dark:text-rose-100">{updateError}</p>
+            <button
+              type="button"
+              className="mt-4 h-10 cursor-pointer rounded-lg border-0 bg-rose-600 px-4 text-sm font-bold text-white hover:bg-rose-700"
+              onClick={() => setAlertStatus(null)}
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
+
+      {alertStatus === 'success' && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" role="status" aria-live="polite">
+          <div className="w-full max-w-md rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center shadow-xl dark:border-emerald-900 dark:bg-emerald-950">
+            <p className="m-0 text-sm font-bold text-emerald-800 dark:text-emerald-100">Update Berhasil diterapkan!</p>
+          </div>
+        </div>
+      )}
 
       {editForm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" role="presentation">
