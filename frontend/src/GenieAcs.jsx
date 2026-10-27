@@ -903,18 +903,15 @@ function WanPanel({
     setIsWanIpOpen(kind === 'ip')
   }
 
-  async function handlePppSubmit() {
-    const ok = await onSavePpp(wanForm, {
+  function handlePppSubmit() {
+    return onSavePpp(wanForm, {
       editingPath: editingWanPath,
       rememberPath: setEditingWanPath,
     })
-    if (ok) {
-      closeWanModal()
-    }
   }
 
-  async function handleIpSubmit() {
-    const ok = await onSaveIp({
+  function handleIpSubmit() {
+    return onSaveIp({
       ...wanForm,
       username: undefined,
       password: undefined,
@@ -924,9 +921,6 @@ function WanPanel({
       editingPath: editingWanPath,
       rememberPath: setEditingWanPath,
     })
-    if (ok) {
-      closeWanModal()
-    }
   }
 
   function openEditWan(wan) {
@@ -1229,6 +1223,20 @@ function WanPortPicker({ selectedPorts, ssidCount, onToggle, tone, disabled = fa
   )
 }
 
+function WanSavingOverlay() {
+  return (
+    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="wan-saving-title" aria-describedby="wan-saving-text" aria-busy="true">
+      <div className="flex max-w-sm transform flex-col items-center gap-5 rounded-2xl bg-white px-8 py-8 text-center shadow-2xl transition-all dark:bg-gray-800">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-500" />
+        <h3 id="wan-saving-title" className="text-lg font-bold text-gray-800 dark:text-gray-100">Menyimpan Konfigurasi...</h3>
+        <p id="wan-saving-text" className="text-sm text-gray-500 dark:text-gray-400">
+          Memproses perintah TR-069 ke perangkat. Mohon jangan tutup halaman atau menekan tombol apa pun.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function WanConfigModal({
   variant, editing = false, manufacturer = '', saving = false, form, ssidCount = 4, onChange, onPatch, onPortChange, onClose, onSave,
 }) {
@@ -1264,23 +1272,67 @@ function WanConfigModal({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, busy])
 
+  function confirmSave() {
+    if (isPpp) {
+      return Swal.fire({
+        title: editing ? 'Simpan perubahan WAN PPP?' : 'Buat koneksi WAN PPP?',
+        text: 'Seluruh isian dikirim ke ONU sebagai parameter TR-069.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Ya, Simpan',
+        cancelButtonText: 'Batal',
+      })
+    }
+    const routed = isIpRoutedType(form.connectionType)
+    return Swal.fire({
+      title: editing ? 'Simpan perubahan WAN IP?' : 'Buat koneksi WAN IP?',
+      text: routed
+        ? 'Koneksi IP routed dikirim ke ONU beserta VLAN dan port binding.'
+        : 'Koneksi IP bridge dikirim tanpa alamat IP, username, atau password.',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Ya, Simpan',
+      cancelButtonText: 'Batal',
+    })
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
     if (submitLock.current || isLoading || saving || !onSave) {
       return
     }
+    const confirm = await confirmSave()
+    if (!confirm.isConfirmed) {
+      return
+    }
     submitLock.current = true
     setIsLoading(true)
+    let outcome = null
     try {
-      await onSave()
-    } catch {
-      // Pesan gagal sudah ditampilkan oleh pemanggil simpan.
+      outcome = await onSave()
+    } catch (error) {
+      outcome = { ok: false, message: errorMessage(error, 'Gagal mengirim konfigurasi WAN.') }
     } finally {
       submitLock.current = false
       if (formAlive.current) {
         setIsLoading(false)
       }
     }
+    if (!formAlive.current || !outcome || outcome.cancelled) {
+      return
+    }
+    if (outcome.ok) {
+      onClose()
+      Swal.fire({
+        icon: outcome.partial ? 'warning' : 'success',
+        title: outcome.partial ? 'Sebagian tersimpan' : 'Berhasil',
+        text: outcome.message,
+        timer: 3200,
+        showConfirmButton: false,
+      })
+      return
+    }
+    Swal.fire({ icon: 'error', title: 'Gagal', text: outcome.message || 'Gagal mengirim konfigurasi WAN.' })
   }
 
   const ipField = (field, label) => (
@@ -1299,7 +1351,7 @@ function WanConfigModal({
     />
   )
 
-  return createPortal(
+  const dialog = createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
       onMouseDown={(event) => {
@@ -1545,21 +1597,22 @@ function WanConfigModal({
           </button>
           <button
             type="submit"
-            className={`inline-flex items-center justify-center gap-2 rounded-lg border-0 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${busy ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'} ${saveClass}`}
+            className={`rounded-lg border-0 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${busy ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'} ${saveClass}`}
             disabled={busy}
           >
-            {busy && (
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-            )}
-            {busy ? 'Menyimpan...' : 'Simpan Konfigurasi'}
+            Simpan Konfigurasi
           </button>
         </div>
       </form>
     </div>,
     document.body,
+  )
+
+  return (
+    <>
+      {dialog}
+      {isLoading && createPortal(<WanSavingOverlay />, document.body)}
+    </>
   )
 }
 
@@ -2685,18 +2738,7 @@ function GenieAcs() {
   // Buat atau ubah koneksi WAN PPP (POST /api/acs/wan-ppp -> AddObject + setParameterValues).
   async function handleSaveWanPpp(form, { editingPath, rememberPath }) {
     if (!requireServer() || !selectedDevice || isSavingWan) {
-      return false
-    }
-    const confirm = await Swal.fire({
-      title: editingPath ? 'Simpan perubahan WAN PPP?' : 'Buat koneksi WAN PPP?',
-      text: 'Seluruh isian dikirim ke ONU sebagai parameter TR-069.',
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonText: 'Ya, Simpan',
-      cancelButtonText: 'Batal',
-    })
-    if (!confirm.isConfirmed) {
-      return false
+      return { cancelled: true }
     }
 
     setIsSavingWan(true)
@@ -2709,22 +2751,14 @@ function GenieAcs() {
         ...form,
         ports: orderedPorts(form.selectedPorts),
       })
-      Swal.fire({
-        icon: result.partial ? 'warning' : 'success',
-        title: result.partial ? 'Sebagian tersimpan' : 'Berhasil',
-        text: result.message,
-        timer: 3200,
-        showConfirmButton: false,
-      })
       setTimeout(() => setWansReloadKey((key) => key + 1), 2500)
-      return true
+      return { ok: true, partial: Boolean(result.partial), message: result.message }
     } catch (requestError) {
       const wanPath = requestError?.response?.data?.wanPath
       if (wanPath) {
         rememberPath(wanPath)
       }
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(requestError, 'Gagal mengirim koneksi WAN PPP.') })
-      return false
+      return { ok: false, message: errorMessage(requestError, 'Gagal mengirim koneksi WAN PPP.') }
     } finally {
       setIsSavingWan(false)
     }
@@ -2733,23 +2767,10 @@ function GenieAcs() {
   // Buat atau ubah koneksi WAN IP (POST /api/acs/wan-ip -> AddObject WANIPConnection + setParameterValues).
   async function handleSaveWanIp(form, { editingPath, rememberPath }) {
     if (!requireServer() || !selectedDevice || isSavingWan) {
-      return false
+      return { cancelled: true }
     }
     const routed = form.connectionType === 'IP_Routed'
     const staticIp = routed && form.addressing === 'Static'
-    const confirm = await Swal.fire({
-      title: editingPath ? 'Simpan perubahan WAN IP?' : 'Buat koneksi WAN IP?',
-      text: routed
-        ? 'Koneksi IP routed dikirim ke ONU beserta VLAN dan port binding.'
-        : 'Koneksi IP bridge dikirim tanpa alamat IP, username, atau password.',
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonText: 'Ya, Simpan',
-      cancelButtonText: 'Batal',
-    })
-    if (!confirm.isConfirmed) {
-      return false
-    }
 
     setIsSavingWan(true)
     try {
@@ -2773,22 +2794,14 @@ function GenieAcs() {
         dnsServer: staticIp ? form.dnsServer : '',
         ports: orderedPorts(form.ports ?? form.selectedPorts),
       })
-      Swal.fire({
-        icon: result.partial ? 'warning' : 'success',
-        title: result.partial ? 'Sebagian tersimpan' : 'Berhasil',
-        text: result.message,
-        timer: 3200,
-        showConfirmButton: false,
-      })
       setTimeout(() => setWansReloadKey((key) => key + 1), 2500)
-      return true
+      return { ok: true, partial: Boolean(result.partial), message: result.message }
     } catch (requestError) {
       const wanPath = requestError?.response?.data?.wanPath
       if (wanPath) {
         rememberPath(wanPath)
       }
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(requestError, 'Gagal mengirim koneksi WAN IP.') })
-      return false
+      return { ok: false, message: errorMessage(requestError, 'Gagal mengirim koneksi WAN IP.') }
     } finally {
       setIsSavingWan(false)
     }
