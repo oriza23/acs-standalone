@@ -152,7 +152,7 @@ function AccountSettings() {
   }
 
   async function handleDelete(admin) {
-    if (isCurrentUser(admin.username, username)) {
+    if (Number(admin.id) === 1 || isCurrentUser(admin.username, username)) {
       return
     }
     const result = await Swal.fire({
@@ -346,11 +346,21 @@ function AccountSettings() {
                 </tr>
               )}
               {!listState.loading && admins.map((admin) => {
+                const superadmin = Number(admin.id) === 1
                 const self = isCurrentUser(admin.username, username)
                 return (
                   <tr key={admin.id} className="border-b border-gray-100 dark:border-gray-700">
                     <td className="px-3 py-3 font-semibold text-gray-900 dark:text-gray-100">{admin.id}</td>
-                    <td className="px-3 py-3 text-gray-800 dark:text-gray-200">{admin.username}</td>
+                    <td className="px-3 py-3 text-gray-800 dark:text-gray-200">
+                      <span className="inline-flex items-center gap-2">
+                        {admin.username}
+                        {superadmin && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold tracking-wide text-amber-800 uppercase dark:bg-amber-950 dark:text-amber-200">
+                            Superadmin
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -364,9 +374,9 @@ function AccountSettings() {
                           type="button"
                           className="h-9 cursor-pointer rounded-lg border-0 bg-rose-600 px-3 text-sm font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                           onClick={() => handleDelete(admin)}
-                          disabled={self || deletingId === admin.id}
+                          disabled={superadmin || self || deletingId === admin.id}
                         >
-                          {self ? 'Akun ini' : deletingId === admin.id ? 'Menghapus...' : 'Hapus'}
+                          {superadmin ? 'Superadmin' : self ? 'Akun ini' : deletingId === admin.id ? 'Menghapus...' : 'Hapus'}
                         </button>
                       </div>
                     </td>

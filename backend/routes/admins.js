@@ -72,6 +72,12 @@ async function deleteAdminById(req, res) {
       message: 'ID admin tidak valid',
     });
   }
+  if (id === 1) {
+    return res.status(403).json({
+      success: false,
+      message: 'Superadmin utama tidak boleh dihapus!',
+    });
+  }
 
   try {
     const [rows] = await pool.execute(
