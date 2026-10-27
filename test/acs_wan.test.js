@@ -4,6 +4,8 @@ const {
   parseWanPpp, planWanPpp, supportsPppoeRouted, connectionTypeError, vendorProfile, connectionPathOf, formatAcsFault,
   selectWanLocation, selectTr181Location, normalizeAcsObjectName, sanitizeParameterValues, batchWanParameters, omitBridgeAuth,
   parseWanIp, planWanIp, generatePortBindingString, isF67Family,
+  ctcomFallbackPayload, zteVlanFallbackPayloads, detectZteVlanLink, connectionLeavesFor,
+  isCtComZteVariant, isInvalidParameterFault,
 } = require('../backend/acs_wan');
 const { extractWans, ssidCountOf } = require('../backend/acs_summary');
 
@@ -525,6 +527,147 @@ test('WAN PPP menerima array selectedPorts termasuk SSID5', () => {
     sent(plan).get(`${PPP}X_ZTE-COM_LanInterface`),
     'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2,InternetGatewayDevice.LANDevice.1.WLANConfiguration.5',
   );
+});
+
+test('objek WANGPON menaruh VLAN di link GPON dan autentikasi tetap di WANPPPConnection', () => {
+  const pppPath = 'InternetGatewayDevice.WANDevice.2.WANConnectionDevice.4.WANPPPConnection.1.';
+  const connectionPath = 'InternetGatewayDevice.WANDevice.2.WANConnectionDevice.4.';
+  const plan = planWanPpp({
+    values: parseWanPpp(body()).value,
+    manufacturer: 'ZTE',
+    productModel: 'F609',
+    productClass: 'F609 V9.0',
+    accessType: 'GPON',
+    knownLeaves: ['X_CT-COM_WANGPONLinkConfig.VLANIDMark', 'X_CT-COM_WANGPONLinkConfig.Mode'],
+    pppPath,
+    connectionPath,
+  });
+  const values = sent(plan);
+  assert.equal(plan.vlanKind, 'gpon');
+  assert.equal(values.get(`${pppPath}Username`), 'user@isp');
+  assert.equal(values.get(`${pppPath}Password`), 'secret');
+  assert.equal(values.get(`${pppPath}Enable`), true);
+  assert.equal(values.get(`${pppPath}NATEnabled`), true);
+  assert.equal(values.has(`${pppPath}X_ZTE-COM_VLANID`), false);
+  assert.equal(values.has(`${pppPath}X_ZTE-COM_VLANEnable`), false);
+  assert.equal(values.get(`${connectionPath}X_CT-COM_WANGPONLinkConfig.VLANIDMark`), 200);
+  assert.equal(typeof values.get(`${connectionPath}X_CT-COM_WANGPONLinkConfig.VLANIDMark`), 'number');
+  assert.equal(values.get(`${connectionPath}X_CT-COM_WANGPONLinkConfig.Mode`), 2);
+  assert.equal(typeof values.get(`${connectionPath}X_CT-COM_WANGPONLinkConfig.Mode`), 'number');
+  assert.equal(values.get(`${pppPath}X_CT-COM_ServiceList`), 'INTERNET');
+  assert.equal(values.has(`${connectionPath}X_CT-COM_WANGPONLinkConfig.802-1pMark`), false);
+  assert.equal(values.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_CT-COM_WANGPONLinkConfig.VLANIDMark'), false);
+});
+
+test('objek WANEponLinkConfig dipilih lebih dulu daripada WANGPON', () => {
+  assert.equal(detectZteVlanLink(['X_CT-COM_WANEponLinkConfig', 'X_CT-COM_WANGPONLinkConfig']), 'epon');
+  assert.equal(detectZteVlanLink(['X_CT-COM_WANGPONLinkConfig.VLANIDMark']), 'gpon');
+  assert.equal(detectZteVlanLink(['X_ZTE-COM_VLANID']), 'zte');
+  assert.equal(isCtComZteVariant({ knownLeaves: ['WANEponLinkConfig'] }), true);
+  assert.equal(isCtComZteVariant({ productModel: 'F609 V9.0' }), false);
+  const plan = planWanPpp({
+    values: parseWanPpp(body()).value,
+    manufacturer: 'ZTE',
+    accessType: 'GPON',
+    knownLeaves: ['X_CT-COM_WANEponLinkConfig', 'X_CT-COM_WANGPONLinkConfig'],
+    pppPath: PPP,
+    connectionPath: CONNECTION,
+  });
+  const values = sent(plan);
+  assert.equal(plan.vlanKind, 'epon');
+  assert.equal(values.get(`${CONNECTION}X_CT-COM_WANEponLinkConfig.VLANIDMark`), 200);
+  assert.equal(values.get(`${CONNECTION}X_CT-COM_WANEponLinkConfig.Mode`), 2);
+  assert.equal(typeof values.get(`${CONNECTION}X_CT-COM_WANEponLinkConfig.Mode`), 'number');
+  assert.equal(values.has(`${CONNECTION}X_CT-COM_WANGPONLinkConfig.VLANIDMark`), false);
+  assert.equal(values.has(`${PPP}X_ZTE-COM_VLANID`), false);
+  assert.equal(values.get(`${PPP}X_CT-COM_LanInterface`).includes('LANEthernetInterfaceConfig.1'), true);
+  const kinds = zteVlanFallbackPayloads(plan).map((item) => item.kind);
+  assert.deepEqual(kinds, ['gpon', 'zte']);
+});
+
+test('tanpa objek optik ZTE memakai X_ZTE-COM lalu menyiapkan GPON dan EPON', () => {
+  const plan = planFor('ZTE');
+  assert.equal(plan.vlanKind, 'zte');
+  assert.equal(sent(plan).get(`${PPP}X_ZTE-COM_VLANID`), 200);
+  assert.equal(isInvalidParameterFault(new Error('9005: Invalid parameter name')), true);
+  assert.equal(isInvalidParameterFault(new Error('Invalid parameter path')), true);
+  assert.equal(isInvalidParameterFault(new Error('9003: Invalid arguments')), false);
+  const chain = zteVlanFallbackPayloads(plan);
+  assert.deepEqual(chain.map((item) => item.kind), ['gpon', 'epon']);
+  const gpon = new Map(chain[0].parameterValues.map((row) => [row[0], row[1]]));
+  const epon = new Map(chain[1].parameterValues.map((row) => [row[0], row[1]]));
+  assert.equal(gpon.get(`${PPP}Username`), 'user@isp');
+  assert.equal(gpon.get(`${PPP}NATEnabled`), true);
+  assert.equal(gpon.has(`${PPP}X_ZTE-COM_VLANID`), false);
+  assert.equal(gpon.get(`${CONNECTION}X_CT-COM_WANGPONLinkConfig.VLANIDMark`), 200);
+  assert.equal(gpon.get(`${CONNECTION}X_CT-COM_WANGPONLinkConfig.Mode`), 2);
+  assert.equal(epon.get(`${CONNECTION}X_CT-COM_WANEponLinkConfig.VLANIDMark`), 200);
+  assert.equal(epon.get(`${CONNECTION}X_CT-COM_WANEponLinkConfig.Mode`), 2);
+  assert.equal(ctcomFallbackPayload(plan).some((row) => String(row[0]).includes('X_CT-COM_WANGPONLinkConfig')), true);
+});
+
+test('akses EPON tanpa objek tetap standar, dengan cadangan EPON lebih dulu', () => {
+  const plan = planFor('ZTE', { accessType: 'EPON' });
+  assert.equal(plan.vlanKind, 'zte');
+  assert.deepEqual(zteVlanFallbackPayloads(plan).map((item) => item.kind), ['epon', 'gpon']);
+});
+
+test('daun WANConnectionDevice mengikuti indeks yang sedang diproses', () => {
+  const location = selectWanLocation({
+    2: {
+      WANCommonInterfaceConfig: { WANAccessType: { _value: 'GPON' } },
+      WANConnectionDevice: {
+        1: { 'X_CT-COM_WANEponLinkConfig': { VLANIDMark: { _value: 10 } }, WANPPPConnection: { 1: { Enable: { _value: true } } } },
+        4: { 'X_CT-COM_WANGPONLinkConfig': { Mode: { _value: 2 } }, WANPPPConnection: { 1: { Enable: { _value: true } } } },
+      },
+    },
+  }, 'zte');
+  const eponPath = 'InternetGatewayDevice.WANDevice.2.WANConnectionDevice.1.';
+  const gponPath = 'InternetGatewayDevice.WANDevice.2.WANConnectionDevice.4.';
+  assert.equal(detectZteVlanLink(connectionLeavesFor(location, eponPath)), 'epon');
+  assert.equal(detectZteVlanLink(connectionLeavesFor(location, gponPath)), 'gpon');
+});
+
+test('WAN IP dengan WANGPON menaruh VLAN di link CT-COM tanpa autentikasi', () => {
+  const parsed = parseWanIp(ipBody());
+  const plan = planWanIp({
+    values: parsed.value,
+    manufacturer: 'ZTE',
+    modelName: 'F609 V9.0',
+    accessType: 'GPON',
+    knownLeaves: ['X_CT-COM_WANGPONLinkConfig'],
+    ipPath: IP,
+    connectionPath: connectionPathOf(IP),
+  });
+  const values = sent(plan);
+  const link = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_CT-COM_WANGPONLinkConfig';
+  assert.equal(plan.vlanKind, 'gpon');
+  assert.equal(values.get(`${IP}Enable`), true);
+  assert.equal(values.get(`${IP}NATEnabled`), true);
+  assert.equal(values.has(`${IP}Username`), false);
+  assert.equal(values.has(`${IP}Password`), false);
+  assert.equal(values.has(`${IP}X_ZTE-COM_VLANID`), false);
+  assert.equal(values.get(`${link}.VLANIDMark`), 1112);
+  assert.equal(values.get(`${link}.Mode`), 2);
+});
+
+test('WAN IP EPON memakai X_CT-COM_WANEponLinkConfig', () => {
+  const parsed = parseWanIp(ipBody());
+  const plan = planWanIp({
+    values: parsed.value,
+    manufacturer: 'ZTE',
+    accessType: 'EPON',
+    knownLeaves: ['X_CT-COM_WANEponLinkConfig.VLANIDMark'],
+    ipPath: IP,
+    connectionPath: connectionPathOf(IP),
+  });
+  const values = sent(plan);
+  const link = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_CT-COM_WANEponLinkConfig';
+  assert.equal(plan.vlanKind, 'epon');
+  assert.equal(values.get(`${link}.VLANIDMark`), 1112);
+  assert.equal(typeof values.get(`${link}.VLANIDMark`), 'number');
+  assert.equal(values.get(`${link}.Mode`), 2);
+  assert.equal(values.has(`${IP}X_ZTE-COM_VLANID`), false);
 });
 
 test('EPON menaruh VLAN di link EPON, bukan GPON', () => {

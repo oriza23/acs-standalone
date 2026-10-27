@@ -696,9 +696,11 @@ async function readWanTarget(server, deviceId) {
       '_deviceId',
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
       'InternetGatewayDevice.DeviceInfo.ModelName',
+      'InternetGatewayDevice.DeviceInfo.ProductClass',
       'InternetGatewayDevice.WANDevice',
       'Device.DeviceInfo.Manufacturer',
       'Device.DeviceInfo.ModelName',
+      'Device.DeviceInfo.ProductClass',
       'Device.PPP.Interface',
     ].join(','),
   });
@@ -714,10 +716,15 @@ async function readWanTarget(server, deviceId) {
     ?? tr181?.DeviceInfo?.Manufacturer?._value
     ?? doc._deviceId?._Manufacturer,
   );
+  const productClass = manufacturerText(
+    igd?.DeviceInfo?.ProductClass?._value
+    ?? tr181?.DeviceInfo?.ProductClass?._value
+    ?? doc._deviceId?._ProductClass,
+  );
   const productModel = manufacturerText(
     igd?.DeviceInfo?.ModelName?._value
     ?? tr181?.DeviceInfo?.ModelName?._value
-    ?? doc._deviceId?._ProductClass,
+    ?? productClass,
   );
   const profile = vendorProfile(manufacturer);
   const hasWan = numericInstanceKeys(igd?.WANDevice).length > 0;
@@ -728,6 +735,7 @@ async function readWanTarget(server, deviceId) {
     model: hasWan ? 'InternetGatewayDevice' : (tr181 ? 'Device' : 'InternetGatewayDevice'),
     manufacturer,
     productModel,
+    productClass,
     profile,
     ...location,
   };

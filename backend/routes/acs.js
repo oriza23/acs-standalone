@@ -7,7 +7,7 @@ const acs = require('../acs');
 const { parseWlanUpdate, planWlanUpdate } = require('../acs_wlan');
 const { parseLanUpdate, planLanUpdate } = require('../acs_lan');
 const {
-  parseWanPpp, planWanPpp, parseWanIp, planWanIp, connectionTypeError, connectionPathOf, vendorProfile, batchWanParameters, omitBridgeAuth,
+  parseWanPpp, planWanPpp, parseWanIp, planWanIp, connectionTypeError, connectionPathOf, vendorProfile, batchWanParameters, connectionLeavesFor, zteVlanFallbackPayloads, isInvalidParameterFault, omitBridgeAuth,
 } = require('../acs_wan');
 const {
   LIVE_PROJECTION, HOSTS_PROJECTION, WLANS_PROJECTION, LAN_PROJECTION, WANS_PROJECTION,
@@ -421,6 +421,33 @@ async function pushWanBatch(server, deviceId, parameterValues) {
   return acs.sendWanSetParameterValues(server, deviceId, parameterValues);
 }
 
+async function pushWanWithCtFallback(server, deviceId, plan, payload, label, prepare = (rows) => rows) {
+  const queue = [
+    { kind: plan?.vlanKind || 'awal', parameterValues: payload },
+    ...zteVlanFallbackPayloads(plan).map((item) => ({
+      kind: item.kind,
+      parameterValues: prepare(item.parameterValues),
+    })),
+  ];
+  let lastError = null;
+  for (let index = 0; index < queue.length; index += 1) {
+    const item = queue[index];
+    try {
+      if (index > 0) {
+        console.log(`[ACS ${label}] path VLAN ditolak (${lastError.message}). Mencoba struktur ${item.kind}.`);
+      }
+      return await pushWanBatch(server, deviceId, item.parameterValues);
+    } catch (error) {
+      lastError = error;
+      const more = index < queue.length - 1;
+      if (!more || !isInvalidParameterFault(error)) {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
+}
+
 // Buat atau ubah koneksi WAN PPP. Body = isian form (nama, NAT, service, connection type,
 // VLAN, 802.1p, username, password, MTU, port binding) + server_id + deviceId.
 // wanPath kosong membuat instance baru (AddObject) lalu setParameterValues.
@@ -472,18 +499,29 @@ router.post('/wan-ppp', requireAdmin, async (req, res) => {
 
     // Baca ulang pohon setelah AddObject supaya VLAN/MTU hanya memakai parameter yang ada.
     const fresh = await acs.readWanTarget(server, values.deviceId);
-    const knownLeaves = fresh?.knownLeaves?.length ? fresh.knownLeaves : target.knownLeaves;
+    const connectionPath = connectionPathOf(pppPath);
+    const freshLeaves = connectionLeavesFor(fresh, connectionPath);
+    const knownLeaves = freshLeaves.length ? freshLeaves : connectionLeavesFor(target, connectionPath);
     const plan = planWanPpp({
       values,
       manufacturer,
+      productModel: fresh?.productModel || target.productModel,
+      productClass: fresh?.productClass || target.productClass,
       accessType: fresh?.accessType || target.accessType,
       pppPath,
-      connectionPath: connectionPathOf(pppPath),
+      connectionPath,
       knownLeaves,
       dataModel: target.tr181 ? 'Device' : target.model,
     });
     const payload = omitBridgeAuth(batchWanParameters(plan), values.connectionType);
-    const result = await pushWanBatch(server, values.deviceId, payload);
+    const result = await pushWanWithCtFallback(
+      server,
+      values.deviceId,
+      plan,
+      payload,
+      'wan-ppp',
+      (rows) => omitBridgeAuth(rows, values.connectionType),
+    );
     const applied = result.applied;
 
     console.log(`[ACS wan-ppp] ${req.user?.username || '-'} ${server.host}:${server.port} ${values.deviceId} ${plan.profile} ${pppPath} ${plan.fields.join(', ')} (${applied ? 'diterapkan' : 'diantrikan'})`);
@@ -568,22 +606,27 @@ async function saveWanIp(req, res) {
     }
 
     const fresh = await acs.readWanTarget(server, values.deviceId);
-    const knownLeaves = fresh?.knownLeaves?.length ? fresh.knownLeaves : target.knownLeaves;
+    const connectionPath = connectionPathOf(ipPath);
+    const freshLeaves = connectionLeavesFor(fresh, connectionPath);
+    const knownLeaves = freshLeaves.length ? freshLeaves : connectionLeavesFor(target, connectionPath);
     const plan = planWanIp({
       values,
       manufacturer,
       modelName,
+      productModel: fresh?.productModel || target.productModel,
+      productClass: fresh?.productClass || target.productClass,
       accessType: fresh?.accessType || target.accessType,
       ipPath,
-      connectionPath: connectionPathOf(ipPath),
+      connectionPath,
       knownLeaves,
       dataModel: target.model,
     });
-    const payload = batchWanParameters(plan).filter(([path]) => {
+    const stripAuth = (rows) => rows.filter(([path]) => {
       const leaf = String(path).split('.').pop();
       return leaf !== 'Username' && leaf !== 'Password';
     });
-    const result = await pushWanBatch(server, values.deviceId, payload);
+    const payload = stripAuth(batchWanParameters(plan));
+    const result = await pushWanWithCtFallback(server, values.deviceId, plan, payload, 'wan-ip', stripAuth);
     const applied = result.applied;
 
     console.log(`[ACS wan-ip] ${req.user?.username || '-'} ${server.host}:${server.port} ${values.deviceId} ${plan.profile} ${ipPath} ${plan.fields.join(', ')} (${applied ? 'diterapkan' : 'diantrikan'})`);

@@ -546,11 +546,13 @@ function ipBindParameters(profile, ctx) {
   return [[`${ctx.pppPath}${name}`, lan, 'xsd:string']];
 }
 
-function planWanIp({ values, manufacturer, modelName, accessType, ipPath, connectionPath, knownLeaves, dataModel }) {
+function planWanIp({ values, manufacturer, modelName, productModel, productClass, accessType, ipPath, connectionPath, knownLeaves, dataModel }) {
   const profile = dataModel === 'Device' || String(ipPath || '').startsWith('Device.')
     ? 'tr181'
     : vendorProfile(manufacturer || values.manufacturer);
-  const resolvedModel = modelName || values.modelName || '';
+  const resolvedModel = modelName || productModel || values.modelName || '';
+  const vlanKind = profile === 'zte' ? detectZteVlanLink(knownLeaves) : null;
+  const ctcomVariant = vlanKind === 'epon' || vlanKind === 'gpon';
   const ctx = {
     pppPath: ipPath,
     connectionPath,
@@ -565,8 +567,9 @@ function planWanIp({ values, manufacturer, modelName, accessType, ipPath, connec
     manufacturer: manufacturer || values.manufacturer,
     modelName: resolvedModel,
   };
-  const vendor = vendorParameters(profile, ctx, knownLeaves);
-  const alternate = fallbackProfile(profile);
+  const vendor = profile === 'zte' ? zteVendorForKind(ctx, vlanKind) : vendorParameters(profile, ctx, knownLeaves);
+  const alternate = profile === 'zte' ? null : fallbackProfile(profile);
+  const bindProfile = ctcomVariant ? 'ctcom' : profile;
   const batches = [
     {
       key: 'core',
@@ -578,7 +581,9 @@ function planWanIp({ values, manufacturer, modelName, accessType, ipPath, connec
       key: 'vendor',
       label: 'VLAN, 802.1p, dan service list',
       optional: true,
-      parameterValues: profile === 'zte' ? sanitizeParameterValues(vendor) : finalizeParameters(vendor, knownLeaves),
+      parameterValues: profile === 'zte'
+        ? sanitizeParameterValues(vendor)
+        : finalizeParameters(vendor, knownLeaves),
       fallback: alternate ? finalizeParameters(vendorParameters(alternate, ctx), knownLeaves) : null,
     },
     {
@@ -586,9 +591,8 @@ function planWanIp({ values, manufacturer, modelName, accessType, ipPath, connec
       label: 'port binding',
       optional: true,
       parameterValues: profile === 'zte'
-        ? sanitizeParameterValues(ipBindParameters(profile, ctx))
+        ? sanitizeParameterValues(ipBindParameters(bindProfile, ctx))
         : finalizeParameters(ipBindParameters(profile, ctx), knownLeaves),
-      fallback: profile === 'zte' ? sanitizeParameterValues(ipBindParameters('ctcom', ctx)) : null,
     },
   ];
   const fields = ['connectionName', 'enable', 'connectionType', 'nat', 'serviceList', 'vlan', 'priority'];
@@ -598,7 +602,10 @@ function planWanIp({ values, manufacturer, modelName, accessType, ipPath, connec
   if (batches.some((batch) => batch.key === 'bind' && batch.parameterValues.length > 0)) {
     fields.push('ports');
   }
-  return { profile, fields, batches };
+  const fallbackPayloads = profile === 'zte'
+    ? zteVlanPayloads(batches, ctx, ipBindParameters, vlanKind)
+    : [];
+  return { profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads };
 }
 
 function isEmptyParameterValue(value) {
@@ -712,6 +719,10 @@ function selectWanLocation(wanDevices, profile) {
       connections,
       accessType: access == null ? '' : String(access),
       knownLeaves: [...collectParameterNames(connectionNode)],
+      connectionLeaves: Object.fromEntries(instanceKeys(connectionNode).map((connIndex) => [
+        connIndex,
+        [...collectParameterNames(connectionNode[connIndex])],
+      ])),
     };
   });
   const usable = described.filter((item) => item.hasConnectionObject);
@@ -726,6 +737,7 @@ function selectWanLocation(wanDevices, profile) {
       createConnectionDevice: Boolean(fallback),
       accessType: fallback ? fallback.accessType : '',
       knownLeaves: fallback ? fallback.knownLeaves : [],
+      connectionLeaves: fallback?.connectionLeaves || {},
       tr181: false,
     };
   }
@@ -742,6 +754,7 @@ function selectWanLocation(wanDevices, profile) {
     createConnectionDevice: !connectionIndex,
     accessType: chosen.accessType,
     knownLeaves: chosen.knownLeaves,
+    connectionLeaves: chosen.connectionLeaves || {},
     tr181: false,
   };
 }
@@ -778,6 +791,70 @@ function coreParameters(pppPath, values) {
 
 function tr181Parameters() {
   return [];
+}
+
+function isCtComZteVariant({ knownLeaves } = {}) {
+  return detectZteVlanLink(knownLeaves) !== 'zte';
+}
+
+// Objek pada WANConnectionDevice yang sedang diproses. EPON dicek lebih dulu, lalu GPON.
+function detectZteVlanLink(knownLeaves) {
+  const leaves = Array.isArray(knownLeaves) ? knownLeaves : [];
+  const has = (token) => leaves.some((name) => String(name).includes(token));
+  if (has('WANEponLinkConfig')) {
+    return 'epon';
+  }
+  if (has('WANGPONLinkConfig')) {
+    return 'gpon';
+  }
+  return 'zte';
+}
+
+function zteVlanFallbackKinds(primary, accessType) {
+  const optical = String(accessType || '').toLowerCase().includes('epon')
+    ? ['epon', 'gpon']
+    : ['gpon', 'epon'];
+  if (primary === 'zte') {
+    return optical;
+  }
+  return [...optical.filter((kind) => kind !== primary), 'zte'];
+}
+
+function connectionLeavesFor(location, connectionPath) {
+  const match = String(connectionPath || '').match(/WANConnectionDevice\.(\d+)\./);
+  const index = match ? match[1] : '';
+  const scoped = index && location?.connectionLeaves ? location.connectionLeaves[index] : null;
+  if (Array.isArray(scoped) && scoped.length > 0) {
+    return scoped;
+  }
+  return Array.isArray(location?.knownLeaves) ? location.knownLeaves : [];
+}
+
+function isInvalidParameterFault(error) {
+  return /invalid parameter (?:name|path)/i.test(String(error?.message || ''));
+}
+
+const ZTE_VLAN_LINK = {
+  epon: 'X_CT-COM_WANEponLinkConfig',
+  gpon: 'X_CT-COM_WANGPONLinkConfig',
+};
+
+// VLAN CT-COM ZTE ada di WANConnectionDevice, terpisah dari WANPPPConnection / WANIPConnection.
+function zteOpticalLink(ctx, kind) {
+  const link = `${ctx.connectionPath}${ZTE_VLAN_LINK[kind]}`;
+  const vlanId = Number.parseInt(ctx.vlanId, 10);
+  const mode = Number.parseInt(2, 10);
+  const list = [];
+  if (ctx.vlanStatus && Number.isInteger(vlanId) && Number.isInteger(mode)) {
+    push(list, `${link}.Mode`, mode, 'xsd:unsignedInt');
+    push(list, `${link}.VLANIDMark`, vlanId, 'xsd:unsignedInt');
+  }
+  push(list, `${ctx.pppPath}X_CT-COM_ServiceList`, ctx.serviceList, 'xsd:string');
+  return list;
+}
+
+function zteVendorForKind(ctx, kind) {
+  return kind === 'zte' ? zteParameters(ctx) : zteOpticalLink(ctx, kind);
 }
 
 function ctcomParameters(ctx) {
@@ -872,10 +949,12 @@ function bindParameters(profile, ctx) {
 }
 
 // batches dijalankan berurutan. fallback hanya dicoba bila batch vendor ditolak ONU.
-function planWanPpp({ values, manufacturer, accessType, pppPath, connectionPath, knownLeaves, dataModel }) {
+function planWanPpp({ values, manufacturer, productModel, productClass, accessType, pppPath, connectionPath, knownLeaves, dataModel }) {
   const profile = dataModel === 'Device' || String(pppPath || '').startsWith('Device.')
     ? 'tr181'
     : vendorProfile(manufacturer);
+  const vlanKind = profile === 'zte' ? detectZteVlanLink(knownLeaves) : null;
+  const ctcomVariant = vlanKind === 'epon' || vlanKind === 'gpon';
   const ctx = {
     pppPath,
     connectionPath,
@@ -888,8 +967,9 @@ function planWanPpp({ values, manufacturer, accessType, pppPath, connectionPath,
     ports: values.ports,
     isEdit: Boolean(values.wanPath),
   };
-  const vendor = vendorParameters(profile, ctx, knownLeaves);
-  const alternate = fallbackProfile(profile);
+  const vendor = profile === 'zte' ? zteVendorForKind(ctx, vlanKind) : vendorParameters(profile, ctx, knownLeaves);
+  const alternate = profile === 'zte' ? null : fallbackProfile(profile);
+  const bindProfile = ctcomVariant ? 'ctcom' : profile;
   const batches = [
     {
       key: 'core',
@@ -901,15 +981,18 @@ function planWanPpp({ values, manufacturer, accessType, pppPath, connectionPath,
       key: 'vendor',
       label: 'VLAN, 802.1p, dan service list',
       optional: true,
-      parameterValues: profile === 'zte' ? sanitizeParameterValues(vendor) : finalizeParameters(vendor, knownLeaves),
+      parameterValues: profile === 'zte'
+        ? sanitizeParameterValues(vendor)
+        : finalizeParameters(vendor, knownLeaves),
       fallback: alternate ? finalizeParameters(vendorParameters(alternate, ctx), knownLeaves) : null,
     },
     {
       key: 'bind',
       label: 'port binding',
       optional: true,
-      parameterValues: finalizeParameters(bindParameters(profile, ctx), knownLeaves),
-      fallback: profile === 'zte' ? finalizeParameters(bindParameters('ctcom', ctx), knownLeaves) : null,
+      parameterValues: profile === 'zte'
+        ? sanitizeParameterValues(bindParameters(bindProfile, ctx))
+        : finalizeParameters(bindParameters(profile, ctx), knownLeaves),
     },
   ];
   const fields = [
@@ -924,7 +1007,37 @@ function planWanPpp({ values, manufacturer, accessType, pppPath, connectionPath,
   if (batches.some((batch) => batch.key === 'bind' && batch.parameterValues.length > 0)) {
     fields.push('ports');
   }
-  return { profile, fields, batches };
+  const fallbackPayloads = profile === 'zte'
+    ? zteVlanPayloads(batches, ctx, bindParameters, vlanKind)
+    : [];
+  return { profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads };
+}
+
+function zteVlanPayloads(batches, ctx, bindFn, primaryKind) {
+  return zteVlanFallbackKinds(primaryKind, ctx.accessType).map((kind) => ({
+    kind,
+    parameterValues: batchWanParameters({
+      batches: batches.map((batch) => {
+        if (batch.key === 'vendor') {
+          return { ...batch, parameterValues: sanitizeParameterValues(zteVendorForKind(ctx, kind)) };
+        }
+        if (batch.key === 'bind') {
+          return { ...batch, parameterValues: sanitizeParameterValues(bindFn(kind === 'zte' ? 'zte' : 'ctcom', ctx)) };
+        }
+        return batch;
+      }),
+    }),
+  })).filter((item) => item.parameterValues.length > 0);
+}
+
+function ctcomFallbackPayload(plan) {
+  const list = Array.isArray(plan?.fallbackPayloads) ? plan.fallbackPayloads : [];
+  const first = list.find((item) => Array.isArray(item?.parameterValues) && item.parameterValues.length > 0);
+  return first ? first.parameterValues : null;
+}
+
+function zteVlanFallbackPayloads(plan) {
+  return (plan?.fallbackPayloads || []).filter((item) => Array.isArray(item?.parameterValues) && item.parameterValues.length > 0);
 }
 
 // Seluruh parameter WAN dikirim dalam satu setParameterValues.
@@ -989,6 +1102,12 @@ module.exports = {
   normalizeAcsObjectName,
   sanitizeParameterValues,
   batchWanParameters,
+  ctcomFallbackPayload,
+  zteVlanFallbackPayloads,
+  detectZteVlanLink,
+  connectionLeavesFor,
+  isCtComZteVariant,
+  isInvalidParameterFault,
   omitBridgeAuth,
   isBridgedConnection,
   CONNECTION_TYPE_TR069,
