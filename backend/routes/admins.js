@@ -125,6 +125,20 @@ function validUsername(username) {
   return username.length > 0 && username.length <= 50 && /^[A-Za-z0-9._-]+$/.test(username);
 }
 
+async function loggedInAdminId(req) {
+  const current = readText(req.user?.username);
+  if (!current) {
+    return null;
+  }
+  const [rows] = await pool.execute(
+    'SELECT id FROM web_admins WHERE username = ? LIMIT 1',
+    [current],
+  );
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const OWN_PASSWORD_ONLY = 'Anda hanya diizinkan mengubah password untuk akun Anda sendiri!';
+
 router.put('/edit/:id', requireAdmin, async (req, res) => {
   const id = readId(req.params.id);
   const username = readText(req.body?.username);
@@ -150,6 +164,16 @@ router.put('/edit/:id', requireAdmin, async (req, res) => {
   }
 
   try {
+    if (password) {
+      const selfId = await loggedInAdminId(req);
+      if (selfId !== id) {
+        return res.status(403).json({
+          success: false,
+          message: OWN_PASSWORD_ONLY,
+        });
+      }
+    }
+
     const [rows] = await pool.execute(
       'SELECT id FROM web_admins WHERE id = ? LIMIT 1',
       [id],
@@ -346,6 +370,20 @@ router.put('/:username', requireAdmin, async (req, res) => {
   }
 
   try {
+    if (password) {
+      const selfId = await loggedInAdminId(req);
+      const [target] = await pool.execute(
+        'SELECT id FROM web_admins WHERE username = ? LIMIT 1',
+        [username],
+      );
+      if (!target[0] || Number(target[0].id) !== selfId) {
+        return res.status(403).json({
+          success: false,
+          message: OWN_PASSWORD_ONLY,
+        });
+      }
+    }
+
     const [result] = password
       ? await pool.execute(
         'UPDATE web_admins SET password = ?, role = ? WHERE username = ?',

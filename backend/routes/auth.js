@@ -70,7 +70,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const [rows] = await pool.execute(
-      'SELECT username, password, role FROM web_admins WHERE username = ? LIMIT 1',
+      'SELECT id, username, password, role FROM web_admins WHERE username = ? LIMIT 1',
       [username],
     );
     const admin = rows[0];
@@ -102,7 +102,7 @@ router.post('/login', async (req, res) => {
 
     failedAttempts.delete(key);
     const role = admin.role || 'admin';
-    const token = jwt.sign({ username: admin.username, role }, secret, {
+    const token = jwt.sign({ id: admin.id, username: admin.username, role }, secret, {
       algorithm: 'HS256',
       expiresIn,
     });
@@ -111,6 +111,7 @@ router.post('/login', async (req, res) => {
       success: true,
       message: 'Login berhasil',
       token,
+      id: admin.id,
       username: admin.username,
       role,
     });
@@ -125,7 +126,7 @@ router.post('/login', async (req, res) => {
 
 // Cek token masih berlaku (dipakai frontend bila perlu).
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ success: true, username: req.user.username, role: req.user.role });
+  res.json({ success: true, id: req.user.id, username: req.user.username, role: req.user.role });
 });
 
 module.exports = router;

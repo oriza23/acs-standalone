@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Lock, User } from 'lucide-react'
 import Swal from 'sweetalert2'
 import api from './api/axios.js'
-import { getUsername, setUsername } from './api/auth.js'
+import { getUserId, getUsername, setUsername } from './api/auth.js'
 
 const fieldClass = 'flex h-12 items-center gap-2 rounded-xl border border-gray-300 bg-gray-50 px-3 text-gray-500 transition-colors duration-300 focus-within:border-cyan-600 focus-within:bg-white focus-within:ring-4 focus-within:ring-cyan-600/15 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300 dark:focus-within:bg-gray-900'
 const inputClass = 'h-full w-full border-0 bg-transparent text-sm font-medium text-gray-900 outline-none dark:text-gray-100'
@@ -19,9 +19,9 @@ function Notice({ tone, children }) {
   return <p className={className} role={tone === 'ok' ? 'status' : 'alert'}>{children}</p>
 }
 
-function TextField({ label, name, type = 'text', autoComplete, value, onChange, placeholder, required = true }) {
+function TextField({ label, name, type = 'text', autoComplete, value, onChange, placeholder, required = true, disabled = false }) {
   return (
-    <label className="grid gap-1.5 text-sm font-semibold text-gray-600 dark:text-gray-300">
+    <label className={`grid gap-1.5 text-sm font-semibold text-gray-600 dark:text-gray-300 ${disabled ? 'opacity-60' : ''}`}>
       <span>{label}</span>
       <div className={fieldClass}>
         {type === 'password' ? <Lock size={18} aria-hidden="true" /> : <User size={18} aria-hidden="true" />}
@@ -34,6 +34,7 @@ function TextField({ label, name, type = 'text', autoComplete, value, onChange, 
           value={value}
           onChange={onChange}
           required={required}
+          disabled={disabled}
         />
       </div>
     </label>
@@ -57,6 +58,12 @@ function AccountSettings() {
   const [updating, setUpdating] = useState(false)
   const [updateError, setUpdateError] = useState('')
   const updateTimer = useRef(null)
+  const storedUserId = getUserId()
+  const currentUserId = storedUserId ?? admins.find((row) => isCurrentUser(row.username, username))?.id ?? null
+
+  function isOwnAccount(adminId) {
+    return currentUserId != null && Number(adminId) === Number(currentUserId)
+  }
 
   const loadAdmins = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -130,10 +137,10 @@ function AccountSettings() {
     }
     setEditForm((current) => ({ ...current, loading: true, error: '' }))
     try {
-      const editingSelf = admins.some((row) => row.id === editForm.id && isCurrentUser(row.username, username))
+      const editingSelf = isOwnAccount(editForm.id)
       const response = await api.put(`/api/admin/edit/${editForm.id}`, {
         username: editForm.username.trim(),
-        password: editForm.password,
+        password: editingSelf ? editForm.password : '',
       })
       if (editingSelf) {
         const nextName = response.data?.username || editForm.username.trim()
@@ -347,13 +354,18 @@ function AccountSettings() {
               )}
               {!listState.loading && admins.map((admin) => {
                 const superadmin = Number(admin.id) === 1
-                const self = isCurrentUser(admin.username, username)
+                const self = isOwnAccount(admin.id) || isCurrentUser(admin.username, username)
                 return (
                   <tr key={admin.id} className="border-b border-gray-100 dark:border-gray-700">
                     <td className="px-3 py-3 font-semibold text-gray-900 dark:text-gray-100">{admin.id}</td>
                     <td className="px-3 py-3 text-gray-800 dark:text-gray-200">
                       <span className="inline-flex items-center gap-2">
                         {admin.username}
+                        {self && (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                            (Anda)
+                          </span>
+                        )}
                         {superadmin && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold tracking-wide text-amber-800 uppercase dark:bg-amber-950 dark:text-amber-200">
                             Superadmin
@@ -408,7 +420,9 @@ function AccountSettings() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" role="presentation">
           <form className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-700 dark:bg-gray-800" onSubmit={handleEdit} role="dialog" aria-labelledby="edit-admin-title">
             <h2 id="edit-admin-title" className="m-0 text-lg font-bold text-gray-900 dark:text-gray-100">Edit Admin</h2>
-            <p className="mt-1 mb-0 text-sm text-gray-500 dark:text-gray-400">Kosongkan password jika tidak ingin mengubahnya.</p>
+            <p className="mt-1 mb-0 text-sm text-gray-500 dark:text-gray-400">
+              {isOwnAccount(editForm.id) ? 'Kosongkan password jika tidak ingin mengubahnya.' : 'Password akun lain tidak dapat diubah dari sini.'}
+            </p>
             <div className="mt-5 grid gap-4">
               {editForm.error && <Notice>{editForm.error}</Notice>}
               <TextField
@@ -424,10 +438,11 @@ function AccountSettings() {
                 name="edit-password"
                 type="password"
                 autoComplete="new-password"
-                placeholder="Kosongkan jika tidak diubah"
-                value={editForm.password}
+                placeholder={isOwnAccount(editForm.id) ? 'Kosongkan jika tidak diubah' : 'Hanya untuk akun Anda'}
+                value={isOwnAccount(editForm.id) ? editForm.password : ''}
                 onChange={(event) => setEditForm((current) => ({ ...current, password: event.target.value }))}
                 required={false}
+                disabled={!isOwnAccount(editForm.id)}
               />
               <div className="flex gap-2">
                 <button className={buttonClass} type="submit" disabled={editForm.loading}>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Swal from 'sweetalert2'
 import { Menu } from 'lucide-react'
-import { clearSession } from './api/auth.js'
+import { clearSession, getUsername } from './api/auth.js'
 import ThemeToggle from './ThemeToggle.jsx'
 
 const navLinkClass = ({ isActive }) =>
@@ -15,10 +15,22 @@ function Dashboard() {
   const location = useLocation()
   const navigate = useNavigate()
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [username, setUsername] = useState(getUsername)
 
   useEffect(() => {
     setIsSidebarOpen(false)
   }, [location.pathname])
+
+  useEffect(() => {
+    const syncUsername = () => setUsername(getUsername())
+    syncUsername()
+    window.addEventListener('admin-session-changed', syncUsername)
+    window.addEventListener('storage', syncUsername)
+    return () => {
+      window.removeEventListener('admin-session-changed', syncUsername)
+      window.removeEventListener('storage', syncUsername)
+    }
+  }, [])
 
   async function handleLogout() {
     const result = await Swal.fire({
@@ -83,10 +95,10 @@ function Dashboard() {
       </aside>
 
       <main className="min-w-0 flex-1 bg-gray-50 p-6 text-gray-900 transition-colors duration-300 md:px-10 md:py-9 dark:bg-gray-900 dark:text-gray-100">
-        <header className="sticky top-0 z-30 -mx-6 -mt-6 mb-5 flex h-14 items-center gap-3 border-b border-gray-200 bg-white/95 px-3 backdrop-blur-sm md:hidden dark:border-gray-700 dark:bg-gray-900/95">
+        <header className="sticky top-0 z-30 -mx-6 -mt-6 mb-5 flex h-14 items-center gap-3 border-b border-gray-200 bg-white/95 px-3 backdrop-blur-sm md:-mx-10 md:-mt-9 md:px-6 dark:border-gray-700 dark:bg-gray-900/95">
           <button
             type="button"
-            className="grid h-10 w-10 cursor-pointer place-items-center rounded-xl border-0 bg-transparent text-gray-800 transition-colors duration-300 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+            className="grid h-10 w-10 cursor-pointer place-items-center rounded-xl border-0 bg-transparent text-gray-800 transition-colors duration-300 hover:bg-gray-100 md:hidden dark:text-gray-100 dark:hover:bg-gray-800"
             aria-label="Buka menu"
             aria-controls="app-sidebar"
             aria-expanded={isSidebarOpen}
@@ -94,9 +106,12 @@ function Dashboard() {
           >
             <Menu size={22} strokeWidth={2.2} />
           </button>
-          <span className="text-sm font-bold tracking-[0.08em] text-gray-900 uppercase dark:text-gray-100">
+          <span className="text-sm font-bold tracking-[0.08em] text-gray-900 uppercase md:hidden dark:text-gray-100">
             GenieACS
           </span>
+          <p className="m-0 ml-auto text-sm font-semibold text-gray-700 dark:text-gray-200">
+            👤 Halo, {username || 'Admin'}
+          </p>
         </header>
         <Outlet />
       </main>
