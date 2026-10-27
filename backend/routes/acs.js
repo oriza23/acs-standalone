@@ -7,7 +7,7 @@ const acs = require('../acs');
 const { parseWlanUpdate, planWlanUpdate } = require('../acs_wlan');
 const { parseLanUpdate, planLanUpdate } = require('../acs_lan');
 const {
-  parseWanPpp, planWanPpp, parseWanIp, planWanIp, connectionTypeError, connectionPathOf, vendorProfile, batchWanParameters, connectionLeavesFor, zteVlanFallbackPayloads, isInvalidParameterFault, omitBridgeAuth,
+  parseWanPpp, planWanPpp, parseWanIp, planWanIp, connectionTypeError, connectionPathOf, vendorProfile, batchWanParameters, connectionLeavesFor, readOnlyLeavesFor, ctcomWanIndexGuard, cmccGuard, zteVlanFallbackPayloads, isStructuralRejection, isCommitLoopFault, omitBridgeAuth,
 } = require('../acs_wan');
 const {
   LIVE_PROJECTION, HOSTS_PROJECTION, WLANS_PROJECTION, LAN_PROJECTION, WANS_PROJECTION,
@@ -456,7 +456,11 @@ async function pushWanWithCtFallback(server, deviceId, plan, payload, label, pre
     } catch (error) {
       lastError = error;
       const more = index < queue.length - 1;
-      if (!more || !isInvalidParameterFault(error)) {
+      const retry = more
+        && !plan?.singleAttempt
+        && !plan?.vlanBlocked
+        && !isStructuralRejection(error);
+      if (!retry) {
         throw error;
       }
     }
@@ -498,6 +502,26 @@ router.post('/wan-ppp', requireAdmin, async (req, res) => {
       return fail(res, 400, 'Struktur WAN tidak ditemukan pada perangkat. Jalankan Summon lalu coba lagi.');
     }
     console.log(`[ACS wan-ppp] pohon ${values.deviceId}: model=${target.model} WANDevice=${target.wanDeviceIndex || '-'} WANConnectionDevice=${target.connectionIndex || 'baru'}`);
+    const earlyCmcc = cmccGuard({
+      knownLeaves: target.knownLeaves,
+      deviceLeaves: target.deviceLeaves,
+      readOnlyLeaves: target.readOnlyLeaves,
+      manufacturer,
+      productModel: target.productModel,
+      productClass: target.productClass,
+    });
+    if (earlyCmcc.blocked) {
+      return fail(res, 409, earlyCmcc.message);
+    }
+    const earlyGuard = ctcomWanIndexGuard({
+      knownLeaves: target.knownLeaves,
+      readOnlyLeaves: target.readOnlyLeaves,
+      wanIndexValues: target.wanIndexValues,
+      vlanRequested: values.vlanStatus === true,
+    });
+    if (earlyGuard.blocked) {
+      return fail(res, 409, earlyGuard.message);
+    }
 
     await acs.prepareWanPpp(server, values.deviceId, target.model);
 
@@ -518,6 +542,8 @@ router.post('/wan-ppp', requireAdmin, async (req, res) => {
     const connectionPath = connectionPathOf(pppPath);
     const freshLeaves = connectionLeavesFor(fresh, connectionPath);
     const knownLeaves = freshLeaves.length ? freshLeaves : connectionLeavesFor(target, connectionPath);
+    const freshReadOnly = readOnlyLeavesFor(fresh, connectionPath);
+    const readOnlyLeaves = freshReadOnly.length ? freshReadOnly : readOnlyLeavesFor(target, connectionPath);
     const plan = planWanPpp({
       values,
       manufacturer,
@@ -527,8 +553,14 @@ router.post('/wan-ppp', requireAdmin, async (req, res) => {
       pppPath,
       connectionPath,
       knownLeaves,
+      deviceLeaves: fresh?.deviceLeaves?.length ? fresh.deviceLeaves : target.deviceLeaves,
+      readOnlyLeaves,
+      wanIndexValues: fresh?.wanIndexValues?.length ? fresh.wanIndexValues : target.wanIndexValues,
       dataModel: target.tr181 ? 'Device' : target.model,
     });
+    if (plan.vlanBlocked) {
+      throw new acs.NbiError(plan.blockedMessage, undefined, 'READONLY');
+    }
     const payload = omitBridgeAuth(batchWanParameters(plan), values.connectionType);
     const result = await pushWanWithCtFallback(
       server,
@@ -552,6 +584,9 @@ router.post('/wan-ppp', requireAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error(`[ACS wan-ppp] ${values.deviceId} ${pppPath || '-'}: ${error.message}`);
+    if (isCommitLoopFault(error)) {
+      return res.status(502).json({ success: false, message: error.message });
+    }
     let rollbackNote = '';
     let leftoverPath = null;
     if (server && rollbackPath && !values.wanPath) {
@@ -604,6 +639,27 @@ async function saveWanIp(req, res) {
     const manufacturer = target.manufacturer || values.manufacturer;
     const modelName = target.productModel || values.modelName;
     console.log(`[ACS wan-ip] pohon ${values.deviceId}: model=${modelName || '-'} WANDevice=${target.wanDeviceIndex} WANConnectionDevice=${target.connectionIndex || 'baru'}`);
+    const earlyCmcc = cmccGuard({
+      knownLeaves: target.knownLeaves,
+      deviceLeaves: target.deviceLeaves,
+      readOnlyLeaves: target.readOnlyLeaves,
+      manufacturer,
+      productModel: target.productModel,
+      productClass: target.productClass,
+      modelName,
+    });
+    if (earlyCmcc.blocked) {
+      return fail(res, 409, earlyCmcc.message);
+    }
+    const earlyGuard = ctcomWanIndexGuard({
+      knownLeaves: target.knownLeaves,
+      readOnlyLeaves: target.readOnlyLeaves,
+      wanIndexValues: target.wanIndexValues,
+      vlanRequested: values.vlanStatus === true,
+    });
+    if (earlyGuard.blocked) {
+      return fail(res, 409, earlyGuard.message);
+    }
 
     await acs.prepareWanPpp(server, values.deviceId, target.model);
 
@@ -623,6 +679,8 @@ async function saveWanIp(req, res) {
     const connectionPath = connectionPathOf(ipPath);
     const freshLeaves = connectionLeavesFor(fresh, connectionPath);
     const knownLeaves = freshLeaves.length ? freshLeaves : connectionLeavesFor(target, connectionPath);
+    const freshReadOnly = readOnlyLeavesFor(fresh, connectionPath);
+    const readOnlyLeaves = freshReadOnly.length ? freshReadOnly : readOnlyLeavesFor(target, connectionPath);
     const plan = planWanIp({
       values,
       manufacturer,
@@ -633,8 +691,14 @@ async function saveWanIp(req, res) {
       ipPath,
       connectionPath,
       knownLeaves,
+      deviceLeaves: fresh?.deviceLeaves?.length ? fresh.deviceLeaves : target.deviceLeaves,
+      readOnlyLeaves,
+      wanIndexValues: fresh?.wanIndexValues?.length ? fresh.wanIndexValues : target.wanIndexValues,
       dataModel: target.model,
     });
+    if (plan.vlanBlocked) {
+      throw new acs.NbiError(plan.blockedMessage, undefined, 'READONLY');
+    }
     const stripAuth = (rows) => rows.filter(([path]) => {
       const leaf = String(path).split('.').pop();
       return leaf !== 'Username' && leaf !== 'Password';
@@ -655,6 +719,9 @@ async function saveWanIp(req, res) {
     });
   } catch (error) {
     console.error(`[ACS wan-ip] ${values.deviceId} ${ipPath || '-'}: ${error.message}`);
+    if (isCommitLoopFault(error)) {
+      return res.status(502).json({ success: false, message: error.message });
+    }
     let rollbackNote = '';
     let leftoverPath = null;
     if (server && rollbackPath && !values.wanPath) {

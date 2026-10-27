@@ -2,6 +2,7 @@ const net = require('net');
 const pool = require('../database');
 const {
   formatAcsFault, selectWanLocation, selectTr181Location, vendorProfile, normalizeAcsObjectName, sanitizeParameterValues,
+  isCommitLoopFault,
 } = require('./acs_wan');
 
 // ---- Konstanta -------------------------------------------------------------
@@ -441,9 +442,42 @@ function taskInstanceNumber(data) {
   return String(data.instanceNumber);
 }
 
+const COMMIT_LOOP_MESSAGE = 'Gagal: GenieACS menghentikan sesi karena too many commits. Antrean tugas perangkat ini dibersihkan agar server tidak macet.';
+
+function commitLoopSeen(fault) {
+  if (fault == null) {
+    return false;
+  }
+  if (typeof fault === 'string') {
+    return isCommitLoopFault({ message: fault });
+  }
+  const text = [fault.code, fault.message, formatAcsFault(fault, '')].filter(Boolean).join(' ');
+  return isCommitLoopFault({ message: text, code: fault.code });
+}
+
+async function clearWanQueue(server, deviceId, taskId) {
+  if (taskId) {
+    try {
+      await nbiRequest(server, 'DELETE', `/tasks/${encodeURIComponent(String(taskId))}`, { timeout: 8000 });
+    } catch (error) {
+      console.warn(`[ACS wan] hapus task ${taskId}: ${error.message}`);
+    }
+  }
+  if (!deviceId) {
+    return;
+  }
+  try {
+    const query = new URLSearchParams({ query: JSON.stringify({ device: deviceId }) });
+    await nbiRequest(server, 'DELETE', `/tasks/?${query}`, { timeout: 8000 });
+    console.warn(`[ACS wan] antrean ${deviceId} dibersihkan`);
+  } catch (error) {
+    console.warn(`[ACS wan] bersihkan antrean ${deviceId}: ${error.message}`);
+  }
+}
+
 function throwTaskFault(data) {
   if (isParamNode(data) && data.fault) {
-    throw new NbiError(formatAcsFault(data.fault), undefined, 'FAULT');
+    throw new NbiError(formatAcsFault(data.fault), undefined, commitLoopSeen(data.fault) ? 'COMMIT_LOOP' : 'FAULT');
   }
 }
 
@@ -503,12 +537,20 @@ async function pollWanTask(server, deviceId, taskId, budgetMs = WAN_POLL_BUDGET_
     if (!task) {
       return null;
     }
+    if (commitLoopSeen(task.fault)) {
+      await clearWanQueue(server, deviceId, taskId);
+      throw new NbiError(COMMIT_LOOP_MESSAGE, undefined, 'COMMIT_LOOP');
+    }
     throwTaskFault(task);
     if (taskInstanceNumber(task)) {
       return task;
     }
   }
   const faultText = await recentDeviceFault(server, deviceId);
+  if (commitLoopSeen(faultText)) {
+    await clearWanQueue(server, deviceId, taskId);
+    throw new NbiError(COMMIT_LOOP_MESSAGE, undefined, 'COMMIT_LOOP');
+  }
   throw new NbiError(
     faultText
       ? `ONU menolak perintah TR-069. ${faultText}`
@@ -536,6 +578,10 @@ async function postWanTask(server, deviceId, body, {
   } catch (error) {
     if (error instanceof NbiError && error.code === 'TIMEOUT') {
       const faultText = await recentDeviceFault(server, deviceId);
+      if (commitLoopSeen(faultText)) {
+        await clearWanQueue(server, deviceId);
+        throw new NbiError(COMMIT_LOOP_MESSAGE, undefined, 'COMMIT_LOOP');
+      }
       throw new NbiError(
         faultText
           ? `GenieACS belum selesai, dan ONU mencatat fault TR-069. ${faultText}`
@@ -548,6 +594,10 @@ async function postWanTask(server, deviceId, body, {
   }
   if (result.status === 404) {
     throw new NbiError('Perangkat tidak ditemukan di GenieACS (coba SINKRON)', 404);
+  }
+  if (commitLoopSeen(result.data?.fault)) {
+    await clearWanQueue(server, deviceId, result.data?._id);
+    throw new NbiError(COMMIT_LOOP_MESSAGE, undefined, 'COMMIT_LOOP');
   }
   throwTaskFault(result.data);
   if (result.status === 202) {

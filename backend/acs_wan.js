@@ -546,7 +546,7 @@ function ipBindParameters(profile, ctx) {
   return [[`${ctx.pppPath}${name}`, lan, 'xsd:string']];
 }
 
-function planWanIp({ values, manufacturer, modelName, productModel, productClass, accessType, ipPath, connectionPath, knownLeaves, dataModel }) {
+function planWanIp({ values, manufacturer, modelName, productModel, productClass, accessType, ipPath, connectionPath, knownLeaves, deviceLeaves, readOnlyLeaves, wanIndexValues, dataModel }) {
   const profile = dataModel === 'Device' || String(ipPath || '').startsWith('Device.')
     ? 'tr181'
     : vendorProfile(manufacturer || values.manufacturer);
@@ -605,7 +605,13 @@ function planWanIp({ values, manufacturer, modelName, productModel, productClass
   const fallbackPayloads = profile === 'zte'
     ? zteVlanPayloads(batches, ctx, ipBindParameters, vlanKind)
     : [];
-  return { profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads };
+  return applyCmccDetection(applyWanIndexGuard({
+    profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads, singleAttempt: false, vlanBlocked: false, blockedMessage: '',
+  }, ctcomWanIndexGuard({
+    knownLeaves, readOnlyLeaves, wanIndexValues, vlanRequested: values.vlanStatus === true,
+  })), ctx, {
+    knownLeaves, deviceLeaves, readOnlyLeaves, manufacturer, productModel, productClass, modelName: resolvedModel,
+  });
 }
 
 function isEmptyParameterValue(value) {
@@ -657,6 +663,53 @@ function instanceKeys(node) {
 }
 
 // Nama parameter yang benar-benar ada di subtree (bukan indeks instance).
+function isReadOnlyFlag(value) {
+  return value === false || value === 0 || value === '0' || value === 'false';
+}
+
+function isCombinedWanIndex(value) {
+  const text = String(value ?? '').trim();
+  return text !== '' && !/^\d+$/.test(text);
+}
+
+function isVlanWritePath(path) {
+  return /VLANID|VLANEnable|LinkConfig\.Mode|LinkConfig\.802/i.test(String(path));
+}
+
+function collectTreeMeta(node, prefix = '', into = null, depth = 0) {
+  const meta = into || { names: new Set(), readOnly: new Set(), wanIndexValues: [] };
+  if (!isTreeNode(node) || depth > 5) {
+    return meta;
+  }
+  for (const key of Object.keys(node)) {
+    if (key.startsWith('_')) {
+      continue;
+    }
+    const child = node[key];
+    if (!isTreeNode(child)) {
+      continue;
+    }
+    if (/^\d+$/.test(key)) {
+      collectTreeMeta(child, prefix, meta, depth + 1);
+      continue;
+    }
+    const name = prefix ? `${prefix}.${key}` : key;
+    meta.names.add(key);
+    meta.names.add(name);
+    if (isReadOnlyFlag(child._writable)) {
+      meta.readOnly.add(key);
+      meta.readOnly.add(name);
+    }
+    if (key === 'X_CT-COM_WANIndex' && child._value != null && String(child._value).trim() !== '') {
+      meta.wanIndexValues.push(String(child._value).trim());
+    }
+    if (!Object.prototype.hasOwnProperty.call(child, '_value')) {
+      collectTreeMeta(child, name, meta, depth + 1);
+    }
+  }
+  return meta;
+}
+
 function collectParameterNames(node, prefix = '', into = new Set(), depth = 0) {
   if (!isTreeNode(node) || depth > 5) {
     return into;
@@ -713,16 +766,22 @@ function selectWanLocation(wanDevices, profile) {
       };
     });
     const access = device?.WANCommonInterfaceConfig?.WANAccessType?._value;
+    const meta = collectTreeMeta(connectionNode);
+    const connectionMeta = Object.fromEntries(instanceKeys(connectionNode).map((connIndex) => {
+      const item = collectTreeMeta(connectionNode[connIndex]);
+      return [connIndex, item];
+    }));
     return {
       index,
       hasConnectionObject: isTreeNode(connectionNode),
       connections,
       accessType: access == null ? '' : String(access),
-      knownLeaves: [...collectParameterNames(connectionNode)],
-      connectionLeaves: Object.fromEntries(instanceKeys(connectionNode).map((connIndex) => [
-        connIndex,
-        [...collectParameterNames(connectionNode[connIndex])],
-      ])),
+      knownLeaves: [...meta.names],
+      deviceLeaves: [...collectTreeMeta(device).names],
+      readOnlyLeaves: [...meta.readOnly],
+      wanIndexValues: meta.wanIndexValues,
+      connectionLeaves: Object.fromEntries(Object.entries(connectionMeta).map(([connIndex, item]) => [connIndex, [...item.names]])),
+      connectionReadOnly: Object.fromEntries(Object.entries(connectionMeta).map(([connIndex, item]) => [connIndex, [...item.readOnly]])),
     };
   });
   const usable = described.filter((item) => item.hasConnectionObject);
@@ -737,7 +796,11 @@ function selectWanLocation(wanDevices, profile) {
       createConnectionDevice: Boolean(fallback),
       accessType: fallback ? fallback.accessType : '',
       knownLeaves: fallback ? fallback.knownLeaves : [],
+      deviceLeaves: fallback?.deviceLeaves || [],
+      readOnlyLeaves: fallback?.readOnlyLeaves || [],
+      wanIndexValues: fallback?.wanIndexValues || [],
       connectionLeaves: fallback?.connectionLeaves || {},
+      connectionReadOnly: fallback?.connectionReadOnly || {},
       tr181: false,
     };
   }
@@ -754,7 +817,11 @@ function selectWanLocation(wanDevices, profile) {
     createConnectionDevice: !connectionIndex,
     accessType: chosen.accessType,
     knownLeaves: chosen.knownLeaves,
+    deviceLeaves: chosen.deviceLeaves || [],
+    readOnlyLeaves: chosen.readOnlyLeaves || [],
+    wanIndexValues: chosen.wanIndexValues || [],
     connectionLeaves: chosen.connectionLeaves || {},
+    connectionReadOnly: chosen.connectionReadOnly || {},
     tr181: false,
   };
 }
@@ -767,6 +834,10 @@ function selectTr181Location(deviceNode) {
     createConnectionDevice: false,
     accessType: '',
     knownLeaves: [...collectParameterNames(ppp)],
+    deviceLeaves: [],
+    readOnlyLeaves: [],
+    wanIndexValues: [],
+    connectionReadOnly: {},
     tr181: true,
   };
 }
@@ -799,8 +870,10 @@ function isCtComZteVariant({ knownLeaves } = {}) {
 
 // Objek pada WANConnectionDevice yang sedang diproses. EPON dicek lebih dulu, lalu GPON.
 function detectZteVlanLink(knownLeaves) {
-  const leaves = Array.isArray(knownLeaves) ? knownLeaves : [];
-  const has = (token) => leaves.some((name) => String(name).includes(token));
+  const leaves = (Array.isArray(knownLeaves) ? knownLeaves : [])
+    .map((name) => String(name))
+    .filter((name) => !/X_CMCC_/i.test(name));
+  const has = (token) => leaves.some((name) => name.includes(token));
   if (has('WANEponLinkConfig')) {
     return 'epon';
   }
@@ -808,6 +881,141 @@ function detectZteVlanLink(knownLeaves) {
     return 'gpon';
   }
   return 'zte';
+}
+
+const CMCC_CANCEL_MESSAGE = 'Firmware China Mobile mendeteksi parameter tidak standar, konfigurasi otomatis dibatalkan';
+
+function detectionLeaves({ knownLeaves, deviceLeaves } = {}) {
+  return [...new Set([...(knownLeaves || []), ...(deviceLeaves || [])].map((name) => String(name)))];
+}
+
+function hasCmccKeyword(value) {
+  const text = String(value || '');
+  return /X_CMCC_/i.test(text) || /chinamobile/i.test(text.replace(/[\s_-]+/g, ''));
+}
+
+function isCmccSignal({ knownLeaves, deviceLeaves, manufacturer, productModel, productClass, modelName } = {}) {
+  const identity = [manufacturer, productModel, productClass, modelName];
+  if (identity.some((value) => hasCmccKeyword(value))) {
+    return true;
+  }
+  return detectionLeaves({ knownLeaves, deviceLeaves }).some((name) => hasCmccKeyword(name));
+}
+
+function detectCmccLink(knownLeaves, deviceLeaves) {
+  const objects = [];
+  for (const name of detectionLeaves({ knownLeaves, deviceLeaves })) {
+    const parts = name.includes('.') ? name.split('.') : [name];
+    for (const part of parts) {
+      if (/X_CMCC_/i.test(part) && /WAN/i.test(part) && /LinkConfig/i.test(part) && !objects.includes(part)) {
+        objects.push(part);
+      }
+    }
+  }
+  return objects.find((name) => /epon/i.test(name))
+    || objects.find((name) => /gpon/i.test(name))
+    || objects[0]
+    || '';
+}
+
+function cmccLinkLocked(readOnlyLeaves, linkObject) {
+  return (Array.isArray(readOnlyLeaves) ? readOnlyLeaves : []).some((name) => {
+    const text = String(name);
+    return text.includes(linkObject) && isVlanWritePath(text);
+  });
+}
+
+function cmccGuard(hints = {}) {
+  if (!isCmccSignal(hints)) {
+    return { cmcc: false, blocked: false, linkObject: '', message: '' };
+  }
+  const linkObject = detectCmccLink(hints.knownLeaves, hints.deviceLeaves);
+  if (!linkObject || cmccLinkLocked(hints.readOnlyLeaves, linkObject)) {
+    return { cmcc: true, blocked: true, linkObject: '', message: CMCC_CANCEL_MESSAGE };
+  }
+  return { cmcc: true, blocked: false, linkObject, message: '' };
+}
+
+function cmccVlanParameters(ctx, linkObject, knownLeaves, deviceLeaves) {
+  const known = detectionLeaves({ knownLeaves, deviceLeaves });
+  const link = `${ctx.connectionPath}${linkObject}`;
+  const vlanId = Number.parseInt(ctx.vlanId, 10);
+  const mode = Number.parseInt(2, 10);
+  const list = [];
+  if (ctx.vlanStatus && Number.isInteger(vlanId) && Number.isInteger(mode)) {
+    push(list, `${link}.VLANIDMark`, vlanId, 'xsd:unsignedInt');
+    if (known.some((name) => name === `${linkObject}.Mode` || name.endsWith(`.${linkObject}.Mode`))) {
+      push(list, `${link}.Mode`, mode, 'xsd:unsignedInt');
+    }
+  }
+  if (known.some((name) => name.includes('X_CMCC_ServiceList'))) {
+    push(list, `${ctx.pppPath}X_CMCC_ServiceList`, ctx.serviceList, 'xsd:string');
+  }
+  return list;
+}
+
+function cmccBindParameters(ctx, knownLeaves, deviceLeaves) {
+  const known = detectionLeaves({ knownLeaves, deviceLeaves });
+  if (!known.some((name) => name.includes('X_CMCC_LanInterface'))) {
+    return [];
+  }
+  const lan = Array.isArray(ctx.ports)
+    ? generatePortBindingString(ctx.ports, {
+      manufacturer: ctx.manufacturer,
+      modelName: ctx.modelName,
+      wanIpPath: ctx.pppPath,
+    })
+    : selectedLanInterfaces(ctx.ports);
+  if (!lan) {
+    return [];
+  }
+  return [[`${ctx.pppPath}X_CMCC_LanInterface`, lan, 'xsd:string']];
+}
+
+function applyCmccDetection(plan, ctx, hints) {
+  const guard = cmccGuard(hints);
+  if (!guard.cmcc) {
+    return plan;
+  }
+  if (guard.blocked) {
+    return {
+      ...plan,
+      vlanKind: 'cmcc',
+      ctcomVariant: false,
+      fallbackPayloads: [],
+      singleAttempt: true,
+      vlanBlocked: true,
+      blockedMessage: guard.message,
+    };
+  }
+  const batches = plan.batches.map((batch) => {
+    if (batch.key === 'vendor') {
+      return {
+        ...batch,
+        parameterValues: sanitizeParameterValues(cmccVlanParameters(ctx, guard.linkObject, hints.knownLeaves, hints.deviceLeaves)),
+        fallback: null,
+      };
+    }
+    if (batch.key === 'bind') {
+      return {
+        ...batch,
+        parameterValues: sanitizeParameterValues(cmccBindParameters(ctx, hints.knownLeaves, hints.deviceLeaves)),
+        fallback: null,
+      };
+    }
+    return batch;
+  });
+  return {
+    ...plan,
+    batches,
+    vlanKind: 'cmcc',
+    ctcomVariant: false,
+    cmccLink: guard.linkObject,
+    fallbackPayloads: [],
+    singleAttempt: true,
+    vlanBlocked: false,
+    blockedMessage: '',
+  };
 }
 
 function zteVlanFallbackKinds(primary, accessType) {
@@ -830,8 +1038,77 @@ function connectionLeavesFor(location, connectionPath) {
   return Array.isArray(location?.knownLeaves) ? location.knownLeaves : [];
 }
 
+function readOnlyLeavesFor(location, connectionPath) {
+  const match = String(connectionPath || '').match(/WANConnectionDevice\.(\d+)\./);
+  const index = match ? match[1] : '';
+  const scoped = index && location?.connectionReadOnly ? location.connectionReadOnly[index] : null;
+  if (Array.isArray(scoped) && scoped.length > 0) {
+    return scoped;
+  }
+  return Array.isArray(location?.readOnlyLeaves) ? location.readOnlyLeaves : [];
+}
+
+function ctcomWanIndexGuard({ knownLeaves, readOnlyLeaves, wanIndexValues, vlanRequested = false } = {}) {
+  const leaves = Array.isArray(knownLeaves) ? knownLeaves : [];
+  const hasName = leaves.some((name) => String(name).includes('X_CT-COM_WANIndex'));
+  const values = Array.isArray(wanIndexValues) ? wanIndexValues : [];
+  const combined = values.some((value) => isCombinedWanIndex(value));
+  if (!hasName || !combined) {
+    return { blocked: false, singleAttempt: false, omitVlan: false, message: '' };
+  }
+  const locked = (Array.isArray(readOnlyLeaves) ? readOnlyLeaves : [])
+    .some((name) => isVlanWritePath(name));
+  if (locked && vlanRequested) {
+    return {
+      blocked: true,
+      singleAttempt: true,
+      omitVlan: true,
+      message: 'Gagal: struktur VLAN pada modem CT-COM ini hanya bisa dibaca (X_CT-COM_WANIndex). Pembuatan profil dihentikan.',
+    };
+  }
+  return {
+    blocked: false,
+    singleAttempt: true,
+    omitVlan: locked,
+    message: '',
+  };
+}
+
 function isInvalidParameterFault(error) {
   return /invalid parameter (?:name|path)/i.test(String(error?.message || ''));
+}
+
+function isReadOnlyParameterFault(error) {
+  return /9008|read[\s-]*only|not writable|non-writable/i.test(String(error?.message || ''));
+}
+
+function isCommitLoopFault(error) {
+  return error?.code === 'COMMIT_LOOP' || /too_many_commits|too many commits/i.test(String(error?.message || ''));
+}
+
+function isStructuralRejection(error) {
+  return isInvalidParameterFault(error) || isReadOnlyParameterFault(error) || isCommitLoopFault(error);
+}
+
+function applyWanIndexGuard(plan, guard) {
+  if (!guard?.singleAttempt && !guard?.omitVlan) {
+    return plan;
+  }
+  const batches = guard.omitVlan
+    ? plan.batches.map((batch) => (
+      batch.key === 'vendor'
+        ? { ...batch, parameterValues: batch.parameterValues.filter(([path]) => !isVlanWritePath(path)) }
+        : batch
+    ))
+    : plan.batches;
+  return {
+    ...plan,
+    batches,
+    fallbackPayloads: [],
+    singleAttempt: true,
+    vlanBlocked: Boolean(guard.blocked),
+    blockedMessage: guard.message || '',
+  };
 }
 
 const ZTE_VLAN_LINK = {
@@ -949,7 +1226,7 @@ function bindParameters(profile, ctx) {
 }
 
 // batches dijalankan berurutan. fallback hanya dicoba bila batch vendor ditolak ONU.
-function planWanPpp({ values, manufacturer, productModel, productClass, accessType, pppPath, connectionPath, knownLeaves, dataModel }) {
+function planWanPpp({ values, manufacturer, productModel, productClass, accessType, pppPath, connectionPath, knownLeaves, deviceLeaves, readOnlyLeaves, wanIndexValues, dataModel }) {
   const profile = dataModel === 'Device' || String(pppPath || '').startsWith('Device.')
     ? 'tr181'
     : vendorProfile(manufacturer);
@@ -1010,7 +1287,13 @@ function planWanPpp({ values, manufacturer, productModel, productClass, accessTy
   const fallbackPayloads = profile === 'zte'
     ? zteVlanPayloads(batches, ctx, bindParameters, vlanKind)
     : [];
-  return { profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads };
+  return applyCmccDetection(applyWanIndexGuard({
+    profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads, singleAttempt: false, vlanBlocked: false, blockedMessage: '',
+  }, ctcomWanIndexGuard({
+    knownLeaves, readOnlyLeaves, wanIndexValues, vlanRequested: values.vlanStatus === true,
+  })), ctx, {
+    knownLeaves, deviceLeaves, readOnlyLeaves, manufacturer, productModel, productClass,
+  });
 }
 
 function zteVlanPayloads(batches, ctx, bindFn, primaryKind) {
@@ -1106,8 +1389,15 @@ module.exports = {
   zteVlanFallbackPayloads,
   detectZteVlanLink,
   connectionLeavesFor,
+  readOnlyLeavesFor,
+  ctcomWanIndexGuard,
+  cmccGuard,
+  CMCC_CANCEL_MESSAGE,
   isCtComZteVariant,
   isInvalidParameterFault,
+  isReadOnlyParameterFault,
+  isCommitLoopFault,
+  isStructuralRejection,
   omitBridgeAuth,
   isBridgedConnection,
   CONNECTION_TYPE_TR069,
