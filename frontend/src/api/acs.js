@@ -70,3 +70,13 @@ export const updateAcsLan = (payload) => api.post(`${BASE}/update-lan`, payload)
 // payload: { server_id, deviceId (_id GenieACS), wanPath }
 // -> { success, applied, message }
 export const deleteAcsWan = (payload) => api.post(`${BASE}/delete-wan`, payload).then((res) => res.data)
+
+// Buat atau ubah koneksi WAN PPP (AddObject + setParameterValues). Hanya admin.
+// payload: isian form + { server_id, deviceId, wanPath? }
+// -> { success, applied, partial, wanPath, message }
+export const saveAcsWanPpp = (payload) => api.post(`${BASE}/wan-ppp`, payload).then((res) => res.data)
+
+// Buat atau ubah koneksi WAN IP (AddObject WANIPConnection + setParameterValues). Hanya admin.
+// payload: isian form tanpa username/password + { server_id, deviceId, wanPath?, ports: ['LAN1', 'SSID1'] }
+// -> { success, applied, partial, wanPath, message }
+export const saveAcsWanIp = (payload) => api.post(`${BASE}/wan-ip`, payload).then((res) => res.data)

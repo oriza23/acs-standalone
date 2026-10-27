@@ -1,5 +1,8 @@
 const net = require('net');
 const pool = require('../database');
+const {
+  formatAcsFault, selectWanLocation, selectTr181Location, vendorProfile, normalizeAcsObjectName, sanitizeParameterValues,
+} = require('./acs_wan');
 
 // ---- Konstanta -------------------------------------------------------------
 const DEFAULT_NBI_PORT = 7557;
@@ -104,7 +107,7 @@ async function nbiRequest(server, method, path, { body, timeout = NBI_TIMEOUT_MS
     });
     const text = await response.text();
     if (!response.ok && response.status !== 404) {
-      throw new NbiError(`NBI membalas ${response.status}${text ? `: ${text.slice(0, 200)}` : ''}`, response.status);
+      throw new NbiError(`NBI membalas ${response.status}${text ? `: ${text.slice(0, 500)}` : ''}`, response.status);
     }
     let data = null;
     if (text) {
@@ -411,6 +414,199 @@ async function postTask(server, deviceId, body) {
   return result;
 }
 
+// Tugas WAN PPP menunggu sesi TR-069 lebih lama daripada Summon biasa.
+// GenieACS ?timeout= dalam milidetik: bila ONU belum selesai, NBI membalas 202 dan task tetap antre.
+const WAN_TASK_TIMEOUT_MS = 30000;
+const WAN_HTTP_TIMEOUT_MS = 35000;
+const WAN_WAKE_TIMEOUT_MS = 10000;
+const WAN_WAKE_HTTP_TIMEOUT_MS = 15000;
+const WAN_WAKE_DELAY_MS = 2500;
+const WAN_POLL_INTERVAL_MS = 2000;
+const WAN_POLL_BUDGET_MS = 30000;
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function taskInstanceNumber(data) {
+  if (!isParamNode(data) || data.instanceNumber == null || String(data.instanceNumber) === '') {
+    return null;
+  }
+  return String(data.instanceNumber);
+}
+
+function throwTaskFault(data) {
+  if (isParamNode(data) && data.fault) {
+    throw new NbiError(formatAcsFault(data.fault), undefined, 'FAULT');
+  }
+}
+
+async function fetchQueuedTask(server, taskId) {
+  const query = new URLSearchParams({
+    query: JSON.stringify({ _id: taskId }),
+  });
+  const { data } = await nbiRequest(server, 'GET', `/tasks/?${query}`, { timeout: 8000 });
+  return Array.isArray(data) && data.length > 0 ? data[0] : null;
+}
+
+async function recentDeviceFault(server, deviceId) {
+  const query = new URLSearchParams({
+    query: JSON.stringify({ device: deviceId }),
+    sort: JSON.stringify({ timestamp: -1 }),
+    limit: '1',
+  });
+  try {
+    const { data } = await nbiRequest(server, 'GET', `/faults/?${query}`, { timeout: 8000 });
+    const fault = Array.isArray(data) ? data[0] : null;
+    if (!fault) {
+      return '';
+    }
+    const stamp = new Date(fault.timestamp).getTime();
+    if (!Number.isFinite(stamp) || Date.now() - stamp > 2 * 60 * 1000) {
+      return '';
+    }
+    return formatAcsFault(fault, '');
+  } catch {
+    return '';
+  }
+}
+
+// Task 202 belum selesai. Dipantau sampai hilang dari antrean (sukses), membawa fault, atau batas waktu.
+async function pollWanTask(server, deviceId, taskId) {
+  const deadline = Date.now() + WAN_POLL_BUDGET_MS;
+  while (Date.now() < deadline) {
+    await delay(WAN_POLL_INTERVAL_MS);
+    const task = await fetchQueuedTask(server, taskId);
+    if (!task) {
+      return null;
+    }
+    throwTaskFault(task);
+    if (taskInstanceNumber(task)) {
+      return task;
+    }
+  }
+  const faultText = await recentDeviceFault(server, deviceId);
+  throw new NbiError(
+    faultText
+      ? `ONU menolak perintah TR-069. ${faultText}`
+      : 'Perintah masih antre di GenieACS dan sesi TR-069 belum selesai dalam batas waktu. Coba lagi beberapa saat lagi.',
+    undefined,
+    faultText ? 'FAULT' : 'PENDING',
+  );
+}
+
+// POST task WAN dengan connection request, timeout 30 detik, lalu polling bila masih 202.
+async function postWanTask(server, deviceId, body, { genieTimeout = WAN_TASK_TIMEOUT_MS, httpTimeout = WAN_HTTP_TIMEOUT_MS, poll = true } = {}) {
+  const path = `/devices/${encodeURIComponent(deviceId)}/tasks?timeout=${genieTimeout}&connection_request`;
+  let result;
+  try {
+    result = await nbiRequest(server, 'POST', path, { body, timeout: httpTimeout });
+  } catch (error) {
+    if (error instanceof NbiError && error.code === 'TIMEOUT') {
+      const faultText = await recentDeviceFault(server, deviceId);
+      throw new NbiError(
+        faultText
+          ? `GenieACS belum selesai, dan ONU mencatat fault TR-069. ${faultText}`
+          : `GenieACS belum membalas dalam ${Math.round(httpTimeout / 1000)} detik. Perintah kemungkinan masih antre.`,
+        undefined,
+        faultText ? 'FAULT' : 'TIMEOUT',
+      );
+    }
+    throw error;
+  }
+  if (result.status === 404) {
+    throw new NbiError('Perangkat tidak ditemukan di GenieACS (coba SINKRON)', 404);
+  }
+  throwTaskFault(result.data);
+  if (result.status === 202) {
+    if (!poll) {
+      return result;
+    }
+    const taskId = isParamNode(result.data) ? result.data._id : null;
+    if (!taskId) {
+      throw new NbiError('GenieACS mengantrikan perintah tanpa ID task, sehingga statusnya tidak bisa dipantau.', undefined, 'PENDING');
+    }
+    const polled = await pollWanTask(server, deviceId, String(taskId));
+    return { status: 200, data: polled };
+  }
+  return result;
+}
+
+// Connection request singkat supaya ONU terbangun, lalu jeda sebelum AddObject / setParameterValues.
+async function prepareWanPpp(server, deviceId, model) {
+  const objectName = model === 'Device' ? 'Device.DeviceInfo' : 'InternetGatewayDevice.DeviceInfo';
+  try {
+    await postWanTask(
+      server,
+      deviceId,
+      { name: 'refreshObject', objectName },
+      { genieTimeout: WAN_WAKE_TIMEOUT_MS, httpTimeout: WAN_WAKE_HTTP_TIMEOUT_MS, poll: false },
+    );
+  } catch (error) {
+    const unreachable = error instanceof NbiError && (error.status === 404 || (!error.status && !error.code));
+    if (unreachable) {
+      throw error;
+    }
+    console.warn(`[ACS wan-ppp] summon awal ${deviceId}: ${error.message}`);
+  }
+  await delay(WAN_WAKE_DELAY_MS);
+}
+
+async function sendWanSetParameterValues(server, deviceId, parameterValues) {
+  const payload = sanitizeParameterValues(parameterValues);
+  const logged = payload.map(([path, value, type]) => [
+    path,
+    /password/i.test(String(path).split('.').pop()) ? '***' : value,
+    type,
+  ]);
+  console.log('PAYLOAD TR-069:', JSON.stringify(logged, null, 2));
+  if (payload.length === 0) {
+    return { applied: true };
+  }
+  await postWanTask(server, deviceId, { name: 'setParameterValues', parameterValues: payload });
+  return { applied: true };
+}
+
+async function sendWanAddObject(server, deviceId, objectName) {
+  const objectPath = normalizeAcsObjectName(objectName);
+  console.log('ADDOBJECT TR-069:', objectPath);
+  const { data } = await postWanTask(server, deviceId, { name: 'addObject', objectName: objectPath });
+  return { applied: true, instanceNumber: taskInstanceNumber(data) };
+}
+
+async function readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex, childName = 'WANPPPConnection') {
+  const base = `InternetGatewayDevice.WANDevice.${wanDeviceIndex}.WANConnectionDevice`;
+  const projection = connectionIndex ? `${base}.${connectionIndex}.${childName}` : base;
+  const query = new URLSearchParams({
+    query: JSON.stringify({ _id: deviceId }),
+    projection,
+  });
+  const { data } = await nbiRequest(server, 'GET', `/devices/?${query}`, { timeout: 8000 });
+  const doc = Array.isArray(data) ? data[0] : null;
+  const connectionNode = doc?.InternetGatewayDevice?.WANDevice?.[wanDeviceIndex]?.WANConnectionDevice;
+  if (connectionIndex) {
+    return numericInstanceKeys(connectionNode?.[connectionIndex]?.[childName]);
+  }
+  return numericInstanceKeys(connectionNode);
+}
+
+async function resolveNewIndex(readIndexes, previous) {
+  const known = new Set(previous);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (attempt > 0) {
+      await delay(1000);
+    }
+    const current = await readIndexes();
+    const added = current.filter((key) => !known.has(key)).sort((left, right) => Number(left) - Number(right));
+    if (added.length > 0) {
+      return added[added.length - 1];
+    }
+  }
+  return null;
+}
+
 // Konfigurasi WLAN saat ini dari ACS: { model, wlanNode }. model = 'InternetGatewayDevice' (TR-098)
 // atau 'Device' (TR-181); wlanNode = node LANDevice.1.WLANConfiguration.{wlanId} (hanya TR-098).
 // null bila perangkat tidak ada di ACS.
@@ -462,10 +658,233 @@ async function sendSetParameterValues(server, deviceId, parameterValues) {
   return { applied: status !== 202 };
 }
 
-// Menghapus satu instance objek TR-069 (DeleteObject). objectName wajib berakhir titik.
+// Menambah satu instance objek TR-069 (AddObject). Titik di akhir path dibuang.
+// Hasil: { applied, instanceNumber }. instanceNumber null bila ONU belum menjawab (task diantrikan).
+async function sendAddObject(server, deviceId, objectName) {
+  const objectPath = normalizeAcsObjectName(objectName);
+  const { status, data } = await postTask(server, deviceId, { name: 'addObject', objectName: objectPath });
+  if (isParamNode(data) && data.fault) {
+    const detail = [data.fault.code, data.fault.message].filter(Boolean).join(': ');
+    throw new NbiError(`ONU menolak penambahan objek${detail ? ` (${detail})` : ''}`, undefined, 'FAULT');
+  }
+  const instanceNumber = isParamNode(data) && data.instanceNumber != null && String(data.instanceNumber) !== ''
+    ? String(data.instanceNumber)
+    : null;
+  return { applied: status !== 202 && instanceNumber != null, instanceNumber };
+}
+
+function numericInstanceKeys(node) {
+  if (!isParamNode(node)) {
+    return [];
+  }
+  return Object.keys(node).filter((key) => /^\d+$/.test(key)).sort((left, right) => Number(left) - Number(right));
+}
+
+function manufacturerText(value) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return String(value).trim().slice(0, 200);
+}
+
+// Konteks WAN untuk membuat koneksi PPP: merek dari DeviceInfo.Manufacturer (cadangan _deviceId),
+// indeks WANDevice, dan WANConnectionDevice pertama bila sudah ada.
+async function readWanTarget(server, deviceId) {
+  const query = new URLSearchParams({
+    query: JSON.stringify({ _id: deviceId }),
+    projection: [
+      '_deviceId',
+      'InternetGatewayDevice.DeviceInfo.Manufacturer',
+      'InternetGatewayDevice.DeviceInfo.ModelName',
+      'InternetGatewayDevice.WANDevice',
+      'Device.DeviceInfo.Manufacturer',
+      'Device.DeviceInfo.ModelName',
+      'Device.PPP.Interface',
+    ].join(','),
+  });
+  const { data } = await nbiRequest(server, 'GET', `/devices/?${query}`, { timeout: 8000 });
+  const doc = Array.isArray(data) ? data[0] : null;
+  if (!doc) {
+    return null;
+  }
+  const igd = isParamNode(doc.InternetGatewayDevice) ? doc.InternetGatewayDevice : null;
+  const tr181 = isParamNode(doc.Device) ? doc.Device : null;
+  const manufacturer = manufacturerText(
+    igd?.DeviceInfo?.Manufacturer?._value
+    ?? tr181?.DeviceInfo?.Manufacturer?._value
+    ?? doc._deviceId?._Manufacturer,
+  );
+  const productModel = manufacturerText(
+    igd?.DeviceInfo?.ModelName?._value
+    ?? tr181?.DeviceInfo?.ModelName?._value
+    ?? doc._deviceId?._ProductClass,
+  );
+  const profile = vendorProfile(manufacturer);
+  const hasWan = numericInstanceKeys(igd?.WANDevice).length > 0;
+  const location = hasWan
+    ? selectWanLocation(igd.WANDevice, profile)
+    : selectTr181Location(tr181);
+  return {
+    model: hasWan ? 'InternetGatewayDevice' : (tr181 ? 'Device' : 'InternetGatewayDevice'),
+    manufacturer,
+    productModel,
+    profile,
+    ...location,
+  };
+}
+
+// Membuat instance WANPPPConnection. Huawei menaruh VLAN di koneksi PPP, jadi instance baru
+// ditambahkan pada WANConnectionDevice yang sudah ada. Merek lain (VLAN di link GPON/EPON)
+// mendapat WANConnectionDevice baru lalu WANPPPConnection di bawahnya.
+async function readTr181PppIndexes(server, deviceId) {
+  const query = new URLSearchParams({
+    query: JSON.stringify({ _id: deviceId }),
+    projection: 'Device.PPP.Interface',
+  });
+  const { data } = await nbiRequest(server, 'GET', `/devices/?${query}`, { timeout: 8000 });
+  const doc = Array.isArray(data) ? data[0] : null;
+  return numericInstanceKeys(doc?.Device?.PPP?.Interface);
+}
+
+async function createTr181PppInstance(server, deviceId) {
+  const before = await readTr181PppIndexes(server, deviceId);
+  const created = await sendWanAddObject(server, deviceId, 'Device.PPP.Interface.');
+  const pppIndex = created.instanceNumber || await resolveNewIndex(
+    () => readTr181PppIndexes(server, deviceId),
+    before,
+  );
+  if (!pppIndex) {
+    throw new NbiError(
+      'AddObject Device.PPP.Interface selesai tanpa nomor instance. Path TR-181 ini mungkin tidak didukung model ONU.',
+      undefined,
+      'FAULT',
+    );
+  }
+  const pppPath = `Device.PPP.Interface.${pppIndex}.`;
+  return { connectionPath: pppPath, pppPath, rollbackPath: pppPath };
+}
+
+async function createWanPppInstance(server, deviceId, options) {
+  if (options.tr181 || options.profile === 'tr181') {
+    return createTr181PppInstance(server, deviceId);
+  }
+  const { wanDeviceIndex, createConnectionDevice } = options;
+  const createdConnectionDevice = Boolean(createConnectionDevice || !options.connectionIndex);
+  if (!wanDeviceIndex) {
+    throw new NbiError(
+      'Struktur WAN tidak ditemukan pada perangkat. Jalankan Summon lalu coba lagi.',
+      undefined,
+      'FAULT',
+    );
+  }
+  const deviceRoot = `InternetGatewayDevice.WANDevice.${wanDeviceIndex}.WANConnectionDevice`;
+  let connectionIndex = options.connectionIndex || null;
+  if (createdConnectionDevice || !connectionIndex) {
+    const before = await readWanChildIndexes(server, deviceId, wanDeviceIndex);
+    const created = await sendWanAddObject(server, deviceId, `${deviceRoot}.`);
+    connectionIndex = created.instanceNumber || await resolveNewIndex(
+      () => readWanChildIndexes(server, deviceId, wanDeviceIndex),
+      before,
+    );
+    if (!connectionIndex) {
+      throw new NbiError(
+        `AddObject ${deviceRoot}. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
+        undefined,
+        'FAULT',
+      );
+    }
+  }
+  const beforePpp = await readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex);
+  const createdPpp = await sendWanAddObject(server, deviceId, `${deviceRoot}.${connectionIndex}.WANPPPConnection.`);
+  const pppIndex = createdPpp.instanceNumber || await resolveNewIndex(
+    () => readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex),
+    beforePpp,
+  );
+  if (!pppIndex) {
+    throw new NbiError(
+      `AddObject ${deviceRoot}.${connectionIndex}.WANPPPConnection. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
+      undefined,
+      'FAULT',
+    );
+  }
+  const connectionPath = `${deviceRoot}.${connectionIndex}.`;
+  const pppPath = `${connectionPath}WANPPPConnection.${pppIndex}.`;
+  return {
+    connectionPath,
+    pppPath,
+    rollbackPath: createdConnectionDevice ? connectionPath : pppPath,
+  };
+}
+
+// Instance WANIPConnection pada WANConnectionDevice yang sama dengan koneksi yang sudah ada.
+// Indeks WANDevice tidak dikunci ke 1: ONU ZTE lain menaruh layanan di WANDevice yang lebih tinggi.
+async function createWanIpInstance(server, deviceId, options) {
+  if (options.tr181 || options.profile === 'tr181') {
+    throw new NbiError(
+      'Model TR-181 belum mendukung pembuatan WAN IP dari form ini.',
+      undefined,
+      'FAULT',
+    );
+  }
+  const { wanDeviceIndex, createConnectionDevice } = options;
+  const createdConnectionDevice = Boolean(createConnectionDevice || !options.connectionIndex);
+  if (!wanDeviceIndex) {
+    throw new NbiError(
+      'Struktur WAN tidak ditemukan pada perangkat. Jalankan Summon lalu coba lagi.',
+      undefined,
+      'FAULT',
+    );
+  }
+  const deviceRoot = `InternetGatewayDevice.WANDevice.${wanDeviceIndex}.WANConnectionDevice`;
+  let connectionIndex = options.connectionIndex || null;
+  if (createdConnectionDevice || !connectionIndex) {
+    const before = await readWanChildIndexes(server, deviceId, wanDeviceIndex);
+    const created = await sendWanAddObject(server, deviceId, `${deviceRoot}.`);
+    connectionIndex = created.instanceNumber || await resolveNewIndex(
+      () => readWanChildIndexes(server, deviceId, wanDeviceIndex),
+      before,
+    );
+    if (!connectionIndex) {
+      throw new NbiError(
+        `AddObject ${deviceRoot}. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
+        undefined,
+        'FAULT',
+      );
+    }
+  }
+  const beforeIp = await readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex, 'WANIPConnection');
+  const createdIp = await sendWanAddObject(server, deviceId, `${deviceRoot}.${connectionIndex}.WANIPConnection.`);
+  const ipIndex = createdIp.instanceNumber || await resolveNewIndex(
+    () => readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex, 'WANIPConnection'),
+    beforeIp,
+  );
+  if (!ipIndex) {
+    throw new NbiError(
+      `AddObject ${deviceRoot}.${connectionIndex}.WANIPConnection. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
+      undefined,
+      'FAULT',
+    );
+  }
+  const connectionPath = `${deviceRoot}.${connectionIndex}.`;
+  const ipPath = `${connectionPath}WANIPConnection.${ipIndex}.`;
+  return {
+    connectionPath,
+    ipPath,
+    rollbackPath: createdConnectionDevice ? connectionPath : ipPath,
+  };
+}
+
+// Menghapus satu instance objek TR-069 (DeleteObject). Titik di akhir path dibuang.
 // Hasil: { applied: true } bila ONU sudah menghapus, { applied: false } bila hanya diantrikan.
+async function sendWanDeleteObject(server, deviceId, objectName) {
+  const objectPath = normalizeAcsObjectName(objectName);
+  console.log('DELETEOBJECT TR-069:', objectPath);
+  await postWanTask(server, deviceId, { name: 'deleteObject', objectName: objectPath });
+  return { applied: true };
+}
+
 async function sendDeleteObject(server, deviceId, objectName) {
-  const objectPath = String(objectName).endsWith('.') ? String(objectName) : `${objectName}.`;
+  const objectPath = normalizeAcsObjectName(objectName);
   const { status, data } = await postTask(server, deviceId, { name: 'deleteObject', objectName: objectPath });
   if (isParamNode(data) && data.fault) {
     const detail = [data.fault.code, data.fault.message].filter(Boolean).join(': ');
@@ -498,6 +917,13 @@ module.exports = {
   readWlanTarget,
   readLanTarget,
   sendSetParameterValues,
+  sendAddObject,
+  sendWanSetParameterValues,
   sendDeleteObject,
+  sendWanDeleteObject,
+  readWanTarget,
+  prepareWanPpp,
+  createWanPppInstance,
+  createWanIpInstance,
   deleteRemoteDevice,
 };

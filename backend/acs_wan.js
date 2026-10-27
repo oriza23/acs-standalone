@@ -1,0 +1,999 @@
+// Validasi form WAN PPP dan penyusunan parameterValues TR-069 (setParameterValues).
+// Murni (tanpa jaringan/DB) supaya mudah dites. Nama parameter mengikuti data model
+// yang dipakai ONU ZTE, Huawei, FiberHome, dan turunan China-Telecom (X_CT-COM).
+
+const IGD = 'InternetGatewayDevice';
+const PPP_UI_TYPES = ['ip-routed', 'pppoe_bridged', 'pppoe_routed', 'ip-bridged'];
+const SERVICE_LIST = ['INTERNET', 'TR069', 'VOIP', 'IPTV', 'OTHER'];
+const PORT_KEYS = ['lan1', 'lan2', 'lan3', 'lan4', 'ssid1', 'ssid2', 'ssid3', 'ssid4', 'ssid5', 'ssid6', 'ssid7', 'ssid8'];
+const MTU_MIN = 576;
+const MTU_MAX = 1540;
+const WAN_PPP_PATH = /^(?:InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\.|Device\.PPP\.Interface\.\d+\.)$/;
+// Parameter inti TR-098/TR-181 yang hampir selalu ada. Sisanya hanya dikirim bila pohon perangkat memuatnya.
+const CORE_LEAVES = new Set(['Enable', 'Name', 'ConnectionType', 'Username', 'Password', 'NATEnabled']);
+
+// ConnectionType TR-098 / ekstensi vendor. Nilai UI tetap yang dipakai dropdown.
+const CONNECTION_TYPE_TR069 = {
+  'ip-routed': 'IP_Routed',
+  ip_routed: 'IP_Routed',
+  pppoe_bridged: 'PPPoE_Bridged',
+  pppoe_routed: 'PPPoE_Routed',
+  'ip-bridged': 'IP_Bridged',
+  ip_bridged: 'IP_Bridged',
+};
+
+// Merek yang memajang PPPoE_Routed selain FiberHome (sering firmware turunan yang sama).
+const PPP_ROUTED_BRANDS = ['fhtt', 'cdata', 'c-data', 'vsol', 'hioso', 'optilink', 'bdcom'];
+
+const LAN_INTERFACE = {
+  lan1: `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.1`,
+  lan2: `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.2`,
+  lan3: `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.3`,
+  lan4: `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.4`,
+  ssid1: `${IGD}.LANDevice.1.WLANConfiguration.1`,
+  ssid2: `${IGD}.LANDevice.1.WLANConfiguration.2`,
+  ssid3: `${IGD}.LANDevice.1.WLANConfiguration.3`,
+  ssid4: `${IGD}.LANDevice.1.WLANConfiguration.4`,
+  ssid5: `${IGD}.LANDevice.1.WLANConfiguration.5`,
+  ssid6: `${IGD}.LANDevice.1.WLANConfiguration.6`,
+  ssid7: `${IGD}.LANDevice.1.WLANConfiguration.7`,
+  ssid8: `${IGD}.LANDevice.1.WLANConfiguration.8`,
+};
+
+const HUAWEI_BIND = {
+  lan1: 'Lan1Enable',
+  lan2: 'Lan2Enable',
+  lan3: 'Lan3Enable',
+  lan4: 'Lan4Enable',
+  ssid1: 'SSID1Enable',
+  ssid2: 'SSID2Enable',
+  ssid3: 'SSID3Enable',
+  ssid4: 'SSID4Enable',
+  ssid5: 'SSID5Enable',
+  ssid6: 'SSID6Enable',
+  ssid7: 'SSID7Enable',
+  ssid8: 'SSID8Enable',
+};
+
+function supportsPppoeRouted(manufacturer) {
+  const name = String(manufacturer || '').toLowerCase();
+  const compact = name.replace(/[^a-z0-9]+/g, '');
+  return name.includes('fiberhome')
+    || compact.includes('fiberhome')
+    || PPP_ROUTED_BRANDS.some((brand) => name.includes(brand) || compact.includes(brand.replace(/-/g, '')));
+}
+
+function connectionTypeError(manufacturer, connectionType) {
+  if (connectionType === 'pppoe_routed' && !supportsPppoeRouted(manufacturer)) {
+    return 'Connection Type pppoe_routed tidak didukung merek modem ini';
+  }
+  return null;
+}
+
+// Profil parameter vendor. Selain tiga merek utama, pakai X_CT-COM (umum di ONU Tiongkok).
+function mentionsZte(name, compact) {
+  // "Aztech" memuat huruf zte, tetapi bukan merek ZTE.
+  return /(^|[^a-z0-9])zte([^a-z0-9]|$)/.test(name) || compact.startsWith('zte');
+}
+
+function vendorProfile(manufacturer) {
+  const name = String(manufacturer || '').toLowerCase();
+  const compact = name.replace(/[^a-z0-9]+/g, '');
+  if (name.includes('huawei') || compact.includes('huawei')) {
+    return 'huawei';
+  }
+  if (mentionsZte(name, compact)) {
+    return 'zte';
+  }
+  if (name.includes('fiberhome') || compact.includes('fiberhome') || name.includes('fhtt') || compact.includes('fhtt')) {
+    return 'fiberhome';
+  }
+  return 'ctcom';
+}
+
+function readText(value, max) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const text = value.trim();
+  if (!text || text.length > max || /[\u0000-\u001F\u007F]/.test(text)) {
+    return null;
+  }
+  return text;
+}
+
+function readInt(value, min, max) {
+  const text = typeof value === 'number' && Number.isInteger(value)
+    ? String(value)
+    : (typeof value === 'string' ? value.trim() : '');
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const number = Number(text);
+  if (number < min || number > max) {
+    return null;
+  }
+  return number;
+}
+
+function readPorts(value) {
+  const ports = {};
+  for (const key of PORT_KEYS) {
+    ports[key] = false;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const key = String(item || '').trim().toLowerCase();
+      if (!PORT_KEYS.includes(key)) {
+        return { error: 'Port binding tidak valid' };
+      }
+      ports[key] = true;
+    }
+    return { value: ports };
+  }
+  const source = value && typeof value === 'object' ? value : null;
+  if (!source) {
+    return { error: 'Port binding tidak valid' };
+  }
+  for (const key of PORT_KEYS) {
+    if (source[key] === undefined) {
+      continue;
+    }
+    if (typeof source[key] !== 'boolean') {
+      return { error: 'Port binding tidak valid' };
+    }
+    ports[key] = source[key];
+  }
+  return { value: ports };
+}
+
+// Body form Add/Edit WAN PPP. wanPath kosong = buat instance baru.
+function parseWanPpp(body) {
+  const deviceId = typeof body?.deviceId === 'string' ? body.deviceId.trim() : '';
+  if (!deviceId || deviceId.length > 255) {
+    return { error: 'ID perangkat tidak valid' };
+  }
+
+  let wanPath = '';
+  if (body?.wanPath !== undefined && body?.wanPath !== null && body?.wanPath !== '') {
+    wanPath = typeof body.wanPath === 'string' ? body.wanPath.trim() : '';
+    if (wanPath && !wanPath.endsWith('.')) {
+      wanPath += '.';
+    }
+    if (!WAN_PPP_PATH.test(wanPath)) {
+      return { error: 'Path WAN PPP tidak valid' };
+    }
+  }
+
+  const connectionName = readText(body?.connectionName, 128);
+  if (!connectionName) {
+    return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
+  }
+  if (typeof body?.enableConnection !== 'boolean' || typeof body?.natStatus !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
+    return { error: 'Status koneksi, NAT, dan VLAN harus berupa true atau false' };
+  }
+
+  const serviceList = typeof body?.serviceList === 'string' ? body.serviceList.trim() : '';
+  if (!SERVICE_LIST.includes(serviceList)) {
+    return { error: 'Service List tidak valid' };
+  }
+  const connectionType = normalizeConnectionType(body?.connectionType);
+  if (!PPP_UI_TYPES.includes(connectionType)) {
+    return { error: 'Connection Type tidak valid' };
+  }
+
+  let vlanId = 0;
+  if (body.vlanStatus) {
+    vlanId = readInt(body?.vlanId, 1, 4094);
+    if (vlanId === null) {
+      return { error: 'VLAN ID harus bilangan bulat 1-4094' };
+    }
+  }
+  const priority = readInt(body?.priority ?? 0, 0, 7);
+  if (priority === null) {
+    return { error: '802.1p harus bilangan bulat 0-7' };
+  }
+  let mtu = null;
+  if (body?.mtu !== undefined && body?.mtu !== null && String(body.mtu).trim() !== '') {
+    mtu = readInt(body.mtu, MTU_MIN, MTU_MAX);
+    if (mtu === null) {
+      return { error: `MTU harus bilangan bulat ${MTU_MIN}-${MTU_MAX}` };
+    }
+  }
+
+  // Bridge tidak memakai autentikasi PPPoE. Nilai yang masih terbawa dari mode routed diabaikan.
+  const bridged = isBridgedConnection(connectionType);
+  let username = '';
+  let password = null;
+  if (!bridged) {
+    username = readText(body?.username, 128);
+    if (!username) {
+      return { error: 'Username wajib diisi (maksimal 128 karakter)' };
+    }
+    const rawPassword = body?.password;
+    if (rawPassword !== undefined && rawPassword !== null && String(rawPassword) !== '') {
+      if (typeof rawPassword !== 'string') {
+        return { error: 'Password tidak valid' };
+      }
+      password = rawPassword.trim();
+      if (!password || password.length > 64 || /[\u0000-\u001F\u007F]/.test(password)) {
+        return { error: 'Password wajib diisi (maksimal 64 karakter)' };
+      }
+    } else if (!wanPath) {
+      return { error: 'Password wajib diisi (maksimal 64 karakter)' };
+    }
+  }
+
+  const ports = readPorts(body?.ports);
+  if (ports.error) {
+    return { error: ports.error };
+  }
+
+  const manufacturer = typeof body?.manufacturer === 'string' ? body.manufacturer.trim().slice(0, 200) : '';
+
+  return {
+    value: {
+      deviceId,
+      wanPath: wanPath || null,
+      connectionName,
+      enableConnection: body.enableConnection,
+      natStatus: body.natStatus,
+      serviceList,
+      connectionType,
+      vlanStatus: body.vlanStatus,
+      vlanId,
+      priority,
+      username,
+      password,
+      mtu,
+      ports: ports.value,
+      manufacturer,
+    },
+  };
+}
+
+function normalizeConnectionType(value) {
+  const compact = String(value || '').trim().toLowerCase().replace(/-/g, '_');
+  if (compact === 'ip_routed') {
+    return 'ip-routed';
+  }
+  if (compact === 'pppoe_bridged' || compact === 'pppoe_routed') {
+    return compact;
+  }
+  if (compact === 'ip_bridged') {
+    return 'ip-bridged';
+  }
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isBridgedConnection(connectionType) {
+  const compact = String(connectionType || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return compact === 'pppoebridged' || compact === 'ipbridged';
+}
+
+function omitBridgeAuth(parameterValues, connectionType) {
+  if (!isBridgedConnection(connectionType) || !Array.isArray(parameterValues)) {
+    return parameterValues;
+  }
+  return parameterValues.filter(([path]) => {
+    const leaf = String(path).split('.').pop();
+    return leaf !== 'Username' && leaf !== 'Password';
+  });
+}
+
+function accessKind(accessType) {
+  return String(accessType || '').toLowerCase().includes('epon') ? 'Epon' : 'Gpon';
+}
+
+function selectedLanInterfaces(ports) {
+  return PORT_KEYS.filter((key) => ports[key]).map((key) => LAN_INTERFACE[key]).join(',');
+}
+
+const PORT_BIND_ORDER = [
+  ['LAN1', `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.1`],
+  ['LAN2', `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.2`],
+  ['LAN3', `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.3`],
+  ['LAN4', `${IGD}.LANDevice.1.LANEthernetInterfaceConfig.4`],
+  ['SSID1', `${IGD}.LANDevice.1.WLANConfiguration.1`],
+  ['SSID2', `${IGD}.LANDevice.1.WLANConfiguration.2`],
+  ['SSID3', `${IGD}.LANDevice.1.WLANConfiguration.3`],
+  ['SSID4', `${IGD}.LANDevice.1.WLANConfiguration.4`],
+  ['SSID5', `${IGD}.LANDevice.1.WLANConfiguration.5`],
+  ['SSID6', `${IGD}.LANDevice.1.WLANConfiguration.6`],
+  ['SSID7', `${IGD}.LANDevice.1.WLANConfiguration.7`],
+  ['SSID8', `${IGD}.LANDevice.1.WLANConfiguration.8`],
+];
+const PORT_BIND_PATH = new Map(PORT_BIND_ORDER);
+const HUAWEI_BIND_LABEL = {
+  LAN1: 'Lan1Enable',
+  LAN2: 'Lan2Enable',
+  LAN3: 'Lan3Enable',
+  LAN4: 'Lan4Enable',
+  SSID1: 'SSID1Enable',
+  SSID2: 'SSID2Enable',
+  SSID3: 'SSID3Enable',
+  SSID4: 'SSID4Enable',
+  SSID5: 'SSID5Enable',
+  SSID6: 'SSID6Enable',
+  SSID7: 'SSID7Enable',
+  SSID8: 'SSID8Enable',
+};
+const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
+const WAN_IP_PATH = /^InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANIPConnection\.\d+\.$/;
+const IP_CONNECTION_TYPES = ['IP_Routed', 'IP_Bridged'];
+
+function isF67Family(manufacturer, modelName) {
+  const text = `${manufacturer || ''} ${modelName || ''}`;
+  return /F670|F67/i.test(text);
+}
+
+function normalizePortLabels(value) {
+  if (!Array.isArray(value)) {
+    return { error: 'Port binding tidak valid' };
+  }
+  const labels = [];
+  for (const item of value) {
+    const label = String(item || '').trim().toUpperCase();
+    if (!PORT_BIND_PATH.has(label)) {
+      return { error: 'Port binding tidak valid' };
+    }
+    if (!labels.includes(label)) {
+      labels.push(label);
+    }
+  }
+  return { value: labels };
+}
+
+// Array ['LAN1', 'SSID1'] menjadi path TR-069 dipisah koma tanpa spasi.
+// ZTE F67x mewajibkan path WANIPConnection itu sendiri ikut di ujung string.
+function generatePortBindingString(ports, { manufacturer = '', modelName = '', wanIpPath = '' } = {}) {
+  const selected = new Set(
+    (Array.isArray(ports) ? ports : []).map((item) => String(item || '').trim().toUpperCase()),
+  );
+  const paths = PORT_BIND_ORDER.filter(([label]) => selected.has(label)).map(([, path]) => path);
+  if (isF67Family(manufacturer, modelName)) {
+    const self = String(wanIpPath || '').trim().replace(/\.+$/, '');
+    if (self) {
+      paths.push(self);
+    }
+  }
+  return paths.join(',');
+}
+
+function readIpv4(value, label) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!IPV4.test(text) || text === '0.0.0.0') {
+    return { error: `${label} harus alamat IPv4 yang valid` };
+  }
+  return { value: text };
+}
+
+function normalizeIpConnectionType(value) {
+  const compact = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (compact === 'iprouted') {
+    return 'IP_Routed';
+  }
+  if (compact === 'ipbridged') {
+    return 'IP_Bridged';
+  }
+  return '';
+}
+
+function normalizeAddressingType(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text === 'dhcp') {
+    return 'DHCP';
+  }
+  if (text === 'static') {
+    return 'Static';
+  }
+  return '';
+}
+
+// Body form Add/Edit WAN IP. wanPath kosong = buat instance WANIPConnection baru.
+function parseWanIp(body) {
+  const deviceId = typeof body?.deviceId === 'string' ? body.deviceId.trim() : '';
+  if (!deviceId || deviceId.length > 255) {
+    return { error: 'ID perangkat tidak valid' };
+  }
+
+  let wanPath = '';
+  if (body?.wanPath !== undefined && body?.wanPath !== null && body?.wanPath !== '') {
+    wanPath = typeof body.wanPath === 'string' ? body.wanPath.trim() : '';
+    if (wanPath && !wanPath.endsWith('.')) {
+      wanPath += '.';
+    }
+    if (!WAN_IP_PATH.test(wanPath)) {
+      return { error: 'Path WAN IP tidak valid' };
+    }
+  }
+
+  const connectionName = readText(body?.connectionName, 128);
+  if (!connectionName) {
+    return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
+  }
+  if (typeof body?.enableConnection !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
+    return { error: 'Status koneksi dan VLAN harus berupa true atau false' };
+  }
+
+  const serviceList = typeof body?.serviceList === 'string' ? body.serviceList.trim() : '';
+  if (!SERVICE_LIST.includes(serviceList)) {
+    return { error: 'Service List tidak valid' };
+  }
+  const connectionType = normalizeIpConnectionType(body?.connectionType);
+  if (!IP_CONNECTION_TYPES.includes(connectionType)) {
+    return { error: 'Connection Type tidak valid' };
+  }
+
+  let vlanId = 0;
+  if (body.vlanStatus) {
+    vlanId = readInt(body?.vlanId, 1, 4094);
+    if (vlanId === null) {
+      return { error: 'VLAN ID harus bilangan bulat 1-4094' };
+    }
+  }
+  const priority = readInt(body?.priority ?? 0, 0, 7);
+  if (priority === null) {
+    return { error: '802.1p harus bilangan bulat 0-7' };
+  }
+
+  const bridged = connectionType === 'IP_Bridged';
+  let addressingType = 'DHCP';
+  let ipAddress = '';
+  let subnetMask = '';
+  let gateway = '';
+  let dnsServer = '';
+  if (!bridged) {
+    addressingType = normalizeAddressingType(body?.addressing ?? body?.addressingType);
+    if (!addressingType) {
+      return { error: 'Addressing Type tidak valid' };
+    }
+    if (addressingType === 'Static') {
+      const ip = readIpv4(body?.ipAddress, 'IP Address');
+      if (ip.error) {
+        return { error: ip.error };
+      }
+      const mask = readIpv4(body?.subnetMask, 'Subnet Mask');
+      if (mask.error) {
+        return { error: mask.error };
+      }
+      const gate = readIpv4(body?.gateway, 'Default Gateway');
+      if (gate.error) {
+        return { error: gate.error };
+      }
+      const dns = readIpv4(body?.dnsServer, 'DNS');
+      if (dns.error) {
+        return { error: dns.error };
+      }
+      ipAddress = ip.value;
+      subnetMask = mask.value;
+      gateway = gate.value;
+      dnsServer = dns.value;
+    }
+  }
+
+  const ports = normalizePortLabels(body?.ports);
+  if (ports.error) {
+    return { error: ports.error };
+  }
+
+  const manufacturer = typeof body?.manufacturer === 'string' ? body.manufacturer.trim().slice(0, 200) : '';
+  const modelName = typeof body?.modelName === 'string' ? body.modelName.trim().slice(0, 200) : '';
+
+  return {
+    value: {
+      deviceId,
+      wanPath: wanPath || null,
+      connectionName,
+      enableConnection: body.enableConnection,
+      natStatus: !bridged,
+      serviceList,
+      connectionType,
+      vlanStatus: body.vlanStatus,
+      vlanId,
+      priority,
+      addressingType: bridged ? null : addressingType,
+      ipAddress,
+      subnetMask,
+      gateway,
+      dnsServer,
+      ports: ports.value,
+      manufacturer,
+      modelName,
+    },
+  };
+}
+
+function ipCoreParameters(ipPath, values) {
+  const bridged = values.connectionType === 'IP_Bridged';
+  const list = [];
+  push(list, `${ipPath}Enable`, values.enableConnection === true, 'xsd:boolean');
+  push(list, `${ipPath}Name`, String(values.connectionName), 'xsd:string');
+  push(list, `${ipPath}ConnectionType`, values.connectionType, 'xsd:string');
+  push(list, `${ipPath}NATEnabled`, bridged ? false : true, 'xsd:boolean');
+  if (!bridged && values.addressingType) {
+    push(list, `${ipPath}AddressingType`, values.addressingType, 'xsd:string');
+    if (values.addressingType === 'Static') {
+      push(list, `${ipPath}ExternalIPAddress`, values.ipAddress, 'xsd:string');
+      push(list, `${ipPath}SubnetMask`, values.subnetMask, 'xsd:string');
+      push(list, `${ipPath}DefaultGateway`, values.gateway, 'xsd:string');
+      push(list, `${ipPath}DNSServers`, values.dnsServer, 'xsd:string');
+    }
+  }
+  return list;
+}
+
+function ipBindParameters(profile, ctx) {
+  if (profile === 'huawei') {
+    const baseLabels = new Set(['LAN1', 'LAN2', 'LAN3', 'LAN4', 'SSID1', 'SSID2', 'SSID3', 'SSID4']);
+    return PORT_BIND_ORDER
+      .filter(([label]) => baseLabels.has(label) || ctx.ports.includes(label))
+      .map(([label]) => [
+        `${ctx.pppPath}X_HW_LANBIND.${HUAWEI_BIND_LABEL[label]}`,
+        ctx.ports.includes(label),
+        'xsd:boolean',
+      ]);
+  }
+  const lan = generatePortBindingString(ctx.ports, {
+    manufacturer: ctx.manufacturer,
+    modelName: ctx.modelName,
+    wanIpPath: ctx.pppPath,
+  });
+  if (!lan) {
+    return [];
+  }
+  const name = profile === 'zte' ? 'X_ZTE-COM_LanInterface' : 'X_CT-COM_LanInterface';
+  return [[`${ctx.pppPath}${name}`, lan, 'xsd:string']];
+}
+
+function planWanIp({ values, manufacturer, modelName, accessType, ipPath, connectionPath, knownLeaves, dataModel }) {
+  const profile = dataModel === 'Device' || String(ipPath || '').startsWith('Device.')
+    ? 'tr181'
+    : vendorProfile(manufacturer || values.manufacturer);
+  const resolvedModel = modelName || values.modelName || '';
+  const ctx = {
+    pppPath: ipPath,
+    connectionPath,
+    accessType,
+    serviceList: values.serviceList,
+    connectionType: values.connectionType,
+    vlanStatus: values.vlanStatus,
+    vlanId: Number.parseInt(values.vlanStatus ? values.vlanId : 0, 10),
+    priority: Number.parseInt(values.vlanStatus ? values.priority : 0, 10),
+    ports: values.ports,
+    isEdit: Boolean(values.wanPath),
+    manufacturer: manufacturer || values.manufacturer,
+    modelName: resolvedModel,
+  };
+  const vendor = vendorParameters(profile, ctx, knownLeaves);
+  const alternate = fallbackProfile(profile);
+  const batches = [
+    {
+      key: 'core',
+      label: 'parameter standar',
+      optional: false,
+      parameterValues: sanitizeParameterValues(ipCoreParameters(ipPath, values)),
+    },
+    {
+      key: 'vendor',
+      label: 'VLAN, 802.1p, dan service list',
+      optional: true,
+      parameterValues: profile === 'zte' ? sanitizeParameterValues(vendor) : finalizeParameters(vendor, knownLeaves),
+      fallback: alternate ? finalizeParameters(vendorParameters(alternate, ctx), knownLeaves) : null,
+    },
+    {
+      key: 'bind',
+      label: 'port binding',
+      optional: true,
+      parameterValues: profile === 'zte'
+        ? sanitizeParameterValues(ipBindParameters(profile, ctx))
+        : finalizeParameters(ipBindParameters(profile, ctx), knownLeaves),
+      fallback: profile === 'zte' ? sanitizeParameterValues(ipBindParameters('ctcom', ctx)) : null,
+    },
+  ];
+  const fields = ['connectionName', 'enable', 'connectionType', 'nat', 'serviceList', 'vlan', 'priority'];
+  if (values.connectionType === 'IP_Routed') {
+    fields.push('addressing');
+  }
+  if (batches.some((batch) => batch.key === 'bind' && batch.parameterValues.length > 0)) {
+    fields.push('ports');
+  }
+  return { profile, fields, batches };
+}
+
+function isEmptyParameterValue(value) {
+  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+}
+
+function castByType(value, type) {
+  if (type === 'xsd:boolean') {
+    return value === true || value === 'true' || value === 1 || value === '1';
+  }
+  if (type === 'xsd:unsignedInt' || type === 'xsd:int' || type === 'xsd:integer') {
+    const number = Number.parseInt(value, 10);
+    return Number.isInteger(number) ? number : value;
+  }
+  return value;
+}
+
+function push(list, path, value, type) {
+  if (isEmptyParameterValue(value)) {
+    return;
+  }
+  list.push([path, value, type]);
+}
+
+// GenieACS menambahkan ".[]" sendiri pada objectName AddObject.
+// Path yang sudah berakhir titik menjadi "WANPPPConnection..[]" dan ditolak sebagai Invalid parameter path.
+function normalizeAcsObjectName(objectName) {
+  return String(objectName || '').trim().replace(/\.+$/, '');
+}
+
+function sanitizeParameterValues(parameterValues) {
+  if (!Array.isArray(parameterValues)) {
+    return [];
+  }
+  return parameterValues
+    .filter((row) => Array.isArray(row) && row.length >= 2 && !isEmptyParameterValue(row[1]))
+    .map(([path, value, type]) => [path, castByType(value, type), type]);
+}
+
+function isTreeNode(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function instanceKeys(node) {
+  if (!isTreeNode(node)) {
+    return [];
+  }
+  return Object.keys(node).filter((key) => /^\d+$/.test(key)).sort((left, right) => Number(left) - Number(right));
+}
+
+// Nama parameter yang benar-benar ada di subtree (bukan indeks instance).
+function collectParameterNames(node, prefix = '', into = new Set(), depth = 0) {
+  if (!isTreeNode(node) || depth > 5) {
+    return into;
+  }
+  for (const key of Object.keys(node)) {
+    if (key.startsWith('_')) {
+      continue;
+    }
+    const child = node[key];
+    if (!isTreeNode(child)) {
+      continue;
+    }
+    if (/^\d+$/.test(key)) {
+      collectParameterNames(child, prefix, into, depth + 1);
+      continue;
+    }
+    const name = prefix ? `${prefix}.${key}` : key;
+    into.add(key);
+    into.add(name);
+    if (!Object.prototype.hasOwnProperty.call(child, '_value')) {
+      collectParameterNames(child, name, into, depth + 1);
+    }
+  }
+  return into;
+}
+
+function parameterKnown(path, known) {
+  const parts = String(path).split('.');
+  const leaf = parts[parts.length - 1];
+  if (CORE_LEAVES.has(leaf)) {
+    return true;
+  }
+  const parent = parts[parts.length - 2];
+  return known.has(leaf) || known.has(`${parent}.${leaf}`);
+}
+
+function finalizeParameters(list, knownLeaves) {
+  const known = Array.isArray(knownLeaves) ? new Set(knownLeaves) : null;
+  return sanitizeParameterValues(list).filter(([path]) => !known || parameterKnown(path, known));
+}
+
+// Pilih WANDevice yang benar-benar punya WANConnectionDevice. Pada ZTE, indeks 1 sering
+// hanya port optik; koneksi PPP/IP ada di indeks yang lebih tinggi (misalnya 2).
+function selectWanLocation(wanDevices, profile) {
+  const described = instanceKeys(wanDevices).map((index) => {
+    const device = wanDevices[index];
+    const connectionNode = device?.WANConnectionDevice;
+    const connections = instanceKeys(connectionNode).map((connIndex) => {
+      const node = connectionNode[connIndex];
+      return {
+        index: connIndex,
+        ppp: instanceKeys(node?.WANPPPConnection),
+        ip: instanceKeys(node?.WANIPConnection),
+      };
+    });
+    const access = device?.WANCommonInterfaceConfig?.WANAccessType?._value;
+    return {
+      index,
+      hasConnectionObject: isTreeNode(connectionNode),
+      connections,
+      accessType: access == null ? '' : String(access),
+      knownLeaves: [...collectParameterNames(connectionNode)],
+    };
+  });
+  const usable = described.filter((item) => item.hasConnectionObject);
+  const withService = usable.filter((item) => item.connections.some((conn) => conn.ppp.length > 0 || conn.ip.length > 0));
+  const pool = withService.length > 0 ? withService : usable;
+  const chosen = pool.length > 0 ? pool[pool.length - 1] : null;
+  if (!chosen) {
+    const fallback = described.length > 0 ? described[described.length - 1] : null;
+    return {
+      wanDeviceIndex: fallback ? fallback.index : null,
+      connectionIndex: null,
+      createConnectionDevice: Boolean(fallback),
+      accessType: fallback ? fallback.accessType : '',
+      knownLeaves: fallback ? fallback.knownLeaves : [],
+      tr181: false,
+    };
+  }
+  const reuseConnection = profile === 'huawei' || profile === 'zte';
+  let connectionIndex = null;
+  if (reuseConnection && chosen.connections.length > 0) {
+    const withPpp = chosen.connections.filter((conn) => conn.ppp.length > 0);
+    const host = (withPpp.length > 0 ? withPpp : chosen.connections).at(-1);
+    connectionIndex = host.index;
+  }
+  return {
+    wanDeviceIndex: chosen.index,
+    connectionIndex,
+    createConnectionDevice: !connectionIndex,
+    accessType: chosen.accessType,
+    knownLeaves: chosen.knownLeaves,
+    tr181: false,
+  };
+}
+
+function selectTr181Location(deviceNode) {
+  const ppp = deviceNode?.PPP?.Interface;
+  return {
+    wanDeviceIndex: null,
+    connectionIndex: null,
+    createConnectionDevice: false,
+    accessType: '',
+    knownLeaves: [...collectParameterNames(ppp)],
+    tr181: true,
+  };
+}
+
+function coreParameters(pppPath, values) {
+  const list = [];
+  // Satu nilai Enable boolean. ConnectionTrigger dan MTU tidak dikirim.
+  push(list, `${pppPath}Enable`, values.enableConnection === true, 'xsd:boolean');
+  push(list, `${pppPath}Name`, String(values.connectionName), 'xsd:string');
+  push(list, `${pppPath}ConnectionType`, CONNECTION_TYPE_TR069[values.connectionType], 'xsd:string');
+  if (!isBridgedConnection(values.connectionType)) {
+    if (values.username) {
+      push(list, `${pppPath}Username`, values.username, 'xsd:string');
+    }
+    if (values.password) {
+      push(list, `${pppPath}Password`, values.password, 'xsd:string');
+    }
+  }
+  push(list, `${pppPath}NATEnabled`, values.natStatus === true, 'xsd:boolean');
+  return list;
+}
+
+function tr181Parameters() {
+  return [];
+}
+
+function ctcomParameters(ctx) {
+  const link = `${ctx.connectionPath}X_CT-COM_WAN${accessKind(ctx.accessType)}LinkConfig`;
+  const mode = ctx.vlanStatus ? 2 : 0;
+  const list = [];
+  push(list, `${link}.Mode`, mode, 'xsd:unsignedInt');
+  push(list, `${link}.VLANIDMark`, ctx.vlanId, 'xsd:unsignedInt');
+  push(list, `${link}.802-1pMark`, ctx.priority, 'xsd:unsignedInt');
+  push(list, `${ctx.pppPath}X_CT-COM_ServiceList`, ctx.serviceList, 'xsd:string');
+  return list;
+}
+
+function fiberhomeParameters(ctx) {
+  const link = `${ctx.connectionPath}X_FH_WAN${accessKind(ctx.accessType)}LinkConfig`;
+  const list = [];
+  push(list, `${link}.Enable`, ctx.vlanStatus ? 1 : 0, 'xsd:unsignedInt');
+  push(list, `${link}.Mode`, ctx.vlanStatus ? 2 : 0, 'xsd:unsignedInt');
+  push(list, `${link}.VLANID`, ctx.vlanId, 'xsd:unsignedInt');
+  push(list, `${link}.VLANIDMark`, ctx.vlanId, 'xsd:unsignedInt');
+  push(list, `${link}.802-1pMark`, ctx.priority, 'xsd:unsignedInt');
+  push(list, `${ctx.pppPath}X_FH_ServiceList`, ctx.serviceList, 'xsd:string');
+  push(list, `${ctx.pppPath}X_FH_VLANID`, ctx.vlanId, 'xsd:unsignedInt');
+  return list;
+}
+
+// VLAN ZTE berada di WANPPPConnection yang sama dengan autentikasi.
+// X_ZTE-COM_8021PMark tidak ada pada modem ini; prioritas memakai X_ZTE-COM_8021P.
+function zteParameters(ctx) {
+  const vlanId = Number.parseInt(ctx.vlanId, 10);
+  const priority = Number.parseInt(ctx.priority, 10);
+  const list = [];
+  push(list, `${ctx.pppPath}X_ZTE-COM_ServiceList`, ctx.serviceList, 'xsd:string');
+  if (ctx.vlanStatus) {
+    push(list, `${ctx.pppPath}X_ZTE-COM_VLANEnable`, 1, 'xsd:unsignedInt');
+    if (Number.isInteger(vlanId)) {
+      push(list, `${ctx.pppPath}X_ZTE-COM_VLANID`, vlanId, 'xsd:unsignedInt');
+    }
+    if (Number.isInteger(priority)) {
+      push(list, `${ctx.pppPath}X_ZTE-COM_8021P`, priority, 'xsd:unsignedInt');
+    }
+  }
+  return list;
+}
+
+function huaweiParameters(ctx) {
+  const list = [];
+  push(list, `${ctx.pppPath}X_HW_SERVICELIST`, ctx.serviceList, 'xsd:string');
+  push(list, `${ctx.pppPath}X_HW_VLAN`, ctx.vlanId, 'xsd:unsignedInt');
+  push(list, `${ctx.pppPath}X_HW_PRI`, ctx.priority, 'xsd:unsignedInt');
+  return list;
+}
+
+function vendorParameters(profile, ctx, knownLeaves) {
+  if (profile === 'tr181') {
+    return tr181Parameters();
+  }
+  if (profile === 'huawei') {
+    return huaweiParameters(ctx);
+  }
+  if (profile === 'zte') {
+    return zteParameters(ctx);
+  }
+  if (profile === 'fiberhome') {
+    return fiberhomeParameters(ctx);
+  }
+  return ctcomParameters(ctx);
+}
+
+function fallbackProfile(profile) {
+  // ZTE dan FiberHome versi China-Telecom menolak parameter X_ZTE / X_FH dan memakai X_CT-COM.
+  if (profile === 'zte' || profile === 'fiberhome') {
+    return 'ctcom';
+  }
+  return null;
+}
+
+function bindParameters(profile, ctx) {
+  const lan = selectedLanInterfaces(ctx.ports);
+  if (!lan && !ctx.isEdit) {
+    return [];
+  }
+  if (profile === 'huawei') {
+    return PORT_KEYS.filter((key) => !/^ssid[5-8]$/.test(key) || ctx.ports[key]).map((key) => [
+      `${ctx.pppPath}X_HW_LANBIND.${HUAWEI_BIND[key]}`,
+      ctx.ports[key],
+      'xsd:boolean',
+    ]);
+  }
+  const name = profile === 'zte' ? 'X_ZTE-COM_LanInterface' : 'X_CT-COM_LanInterface';
+  return [[`${ctx.pppPath}${name}`, lan, 'xsd:string']];
+}
+
+// batches dijalankan berurutan. fallback hanya dicoba bila batch vendor ditolak ONU.
+function planWanPpp({ values, manufacturer, accessType, pppPath, connectionPath, knownLeaves, dataModel }) {
+  const profile = dataModel === 'Device' || String(pppPath || '').startsWith('Device.')
+    ? 'tr181'
+    : vendorProfile(manufacturer);
+  const ctx = {
+    pppPath,
+    connectionPath,
+    accessType,
+    serviceList: values.serviceList,
+    connectionType: values.connectionType,
+    vlanStatus: values.vlanStatus,
+    vlanId: Number.parseInt(values.vlanStatus ? values.vlanId : 0, 10),
+    priority: Number.parseInt(values.vlanStatus ? values.priority : 0, 10),
+    ports: values.ports,
+    isEdit: Boolean(values.wanPath),
+  };
+  const vendor = vendorParameters(profile, ctx, knownLeaves);
+  const alternate = fallbackProfile(profile);
+  const batches = [
+    {
+      key: 'core',
+      label: 'parameter standar',
+      optional: false,
+      parameterValues: finalizeParameters(coreParameters(pppPath, values), knownLeaves),
+    },
+    {
+      key: 'vendor',
+      label: 'VLAN, 802.1p, dan service list',
+      optional: true,
+      parameterValues: profile === 'zte' ? sanitizeParameterValues(vendor) : finalizeParameters(vendor, knownLeaves),
+      fallback: alternate ? finalizeParameters(vendorParameters(alternate, ctx), knownLeaves) : null,
+    },
+    {
+      key: 'bind',
+      label: 'port binding',
+      optional: true,
+      parameterValues: finalizeParameters(bindParameters(profile, ctx), knownLeaves),
+      fallback: profile === 'zte' ? finalizeParameters(bindParameters('ctcom', ctx), knownLeaves) : null,
+    },
+  ];
+  const fields = [
+    'connectionName', 'enable', 'connectionType', 'nat', 'serviceList', 'vlan', 'priority',
+  ];
+  if (!isBridgedConnection(values.connectionType) && values.username) {
+    fields.push('username');
+  }
+  if (!isBridgedConnection(values.connectionType) && values.password) {
+    fields.push('password');
+  }
+  if (batches.some((batch) => batch.key === 'bind' && batch.parameterValues.length > 0)) {
+    fields.push('ports');
+  }
+  return { profile, fields, batches };
+}
+
+// Seluruh parameter WAN dikirim dalam satu setParameterValues.
+function batchWanParameters(plan) {
+  const byPath = new Map();
+  for (const batch of plan.batches || []) {
+    for (const row of batch.parameterValues || []) {
+      byPath.set(row[0], row);
+    }
+  }
+  return [...byPath.values()];
+}
+
+function connectionPathOf(pppPath) {
+  if (String(pppPath).startsWith('Device.PPP.Interface.')) {
+    return pppPath;
+  }
+  return String(pppPath).replace(/WAN(?:PPP|IP)Connection\.\d+\.$/, '');
+}
+
+// Pesan fault GenieACS / CWMP (kode + teks + parameter yang ditolak) untuk alert frontend.
+function formatAcsFault(fault, fallback = 'ONU menolak perintah TR-069') {
+  if (fault == null || fault === '') {
+    return fallback;
+  }
+  if (typeof fault === 'string') {
+    const text = fault.trim();
+    return text || fallback;
+  }
+  if (typeof fault !== 'object') {
+    return fallback;
+  }
+  const detail = fault.detail && typeof fault.detail === 'object' ? fault.detail : {};
+  const code = detail.faultCode || fault.code || '';
+  const message = detail.faultString || fault.message || '';
+  const rawList = detail.setParameterValuesFault || detail.SetParameterValuesFault || [];
+  const list = Array.isArray(rawList) ? rawList : [rawList];
+  const extra = list.map((item) => {
+    if (!item || typeof item !== 'object') {
+      return '';
+    }
+    const path = item.parameterName || item.ParameterName || '';
+    const itemCode = item.faultCode || item.FaultCode || '';
+    const itemText = item.faultString || item.FaultString || item.message || '';
+    const reason = [itemCode, itemText].filter(Boolean).join(': ');
+    return [path, reason].filter(Boolean).join(' — ');
+  }).filter(Boolean).join('; ');
+  const head = [code, message].filter(Boolean).join(': ');
+  return [head, extra].filter(Boolean).join('. ') || fallback;
+}
+
+module.exports = {
+  parseWanPpp,
+  planWanPpp,
+  supportsPppoeRouted,
+  connectionTypeError,
+  vendorProfile,
+  connectionPathOf,
+  formatAcsFault,
+  selectWanLocation,
+  selectTr181Location,
+  normalizeAcsObjectName,
+  sanitizeParameterValues,
+  batchWanParameters,
+  omitBridgeAuth,
+  isBridgedConnection,
+  CONNECTION_TYPE_TR069,
+  parseWanIp,
+  planWanIp,
+  generatePortBindingString,
+  isF67Family,
+};
