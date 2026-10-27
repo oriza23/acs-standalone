@@ -120,7 +120,20 @@ function AccountSettings() {
     }
   }
 
+  const isSuperadmin = Number(currentUserId) === 1
+
+  function canEditAccount(admin) {
+    return isSuperadmin || isOwnAccount(admin.id) || (currentUserId == null && isCurrentUser(admin.username, username))
+  }
+
+  function canSetPassword(adminId) {
+    return isSuperadmin || isOwnAccount(adminId)
+  }
+
   function openEdit(admin) {
+    if (!canEditAccount(admin)) {
+      return
+    }
     setEditForm({
       id: admin.id,
       username: admin.username,
@@ -132,7 +145,7 @@ function AccountSettings() {
 
   async function handleEdit(event) {
     event.preventDefault()
-    if (!editForm) {
+    if (!editForm || !canEditAccount({ id: editForm.id, username: editForm.username })) {
       return
     }
     setEditForm((current) => ({ ...current, loading: true, error: '' }))
@@ -140,7 +153,7 @@ function AccountSettings() {
       const editingSelf = isOwnAccount(editForm.id)
       const response = await api.put(`/api/admin/edit/${editForm.id}`, {
         username: editForm.username.trim(),
-        password: editingSelf ? editForm.password : '',
+        password: canSetPassword(editForm.id) ? editForm.password : '',
       })
       if (editingSelf) {
         const nextName = response.data?.username || editForm.username.trim()
@@ -159,7 +172,7 @@ function AccountSettings() {
   }
 
   async function handleDelete(admin) {
-    if (Number(admin.id) === 1 || isCurrentUser(admin.username, username)) {
+    if (Number(admin.id) === 1 || isOwnAccount(admin.id) || isCurrentUser(admin.username, username)) {
       return
     }
     const result = await Swal.fire({
@@ -354,7 +367,10 @@ function AccountSettings() {
               )}
               {!listState.loading && admins.map((admin) => {
                 const superadmin = Number(admin.id) === 1
-                const self = isOwnAccount(admin.id) || isCurrentUser(admin.username, username)
+                const selfById = isOwnAccount(admin.id)
+                const selfByName = isCurrentUser(admin.username, username)
+                const self = currentUserId != null ? selfById : selfByName
+                const allowEdit = canEditAccount(admin)
                 return (
                   <tr key={admin.id} className="border-b border-gray-100 dark:border-gray-700">
                     <td className="px-3 py-3 font-semibold text-gray-900 dark:text-gray-100">{admin.id}</td>
@@ -377,8 +393,9 @@ function AccountSettings() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          className="h-9 cursor-pointer rounded-lg border-0 bg-cyan-700 px-3 text-sm font-bold text-white hover:bg-cyan-800"
+                          className="h-9 cursor-pointer rounded-lg border-0 bg-cyan-700 px-3 text-sm font-bold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                           onClick={() => openEdit(admin)}
+                          disabled={!allowEdit}
                         >
                           Edit
                         </button>
@@ -386,7 +403,7 @@ function AccountSettings() {
                           type="button"
                           className="h-9 cursor-pointer rounded-lg border-0 bg-rose-600 px-3 text-sm font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                           onClick={() => handleDelete(admin)}
-                          disabled={superadmin || self || deletingId === admin.id}
+                          disabled={superadmin || selfById || selfByName || deletingId === admin.id}
                         >
                           {superadmin ? 'Superadmin' : self ? 'Akun ini' : deletingId === admin.id ? 'Menghapus...' : 'Hapus'}
                         </button>
@@ -421,7 +438,7 @@ function AccountSettings() {
           <form className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-700 dark:bg-gray-800" onSubmit={handleEdit} role="dialog" aria-labelledby="edit-admin-title">
             <h2 id="edit-admin-title" className="m-0 text-lg font-bold text-gray-900 dark:text-gray-100">Edit Admin</h2>
             <p className="mt-1 mb-0 text-sm text-gray-500 dark:text-gray-400">
-              {isOwnAccount(editForm.id) ? 'Kosongkan password jika tidak ingin mengubahnya.' : 'Password akun lain tidak dapat diubah dari sini.'}
+              {canSetPassword(editForm.id) ? 'Kosongkan password jika tidak ingin mengubahnya.' : 'Password akun lain tidak dapat diubah dari sini.'}
             </p>
             <div className="mt-5 grid gap-4">
               {editForm.error && <Notice>{editForm.error}</Notice>}
@@ -433,17 +450,18 @@ function AccountSettings() {
                 value={editForm.username}
                 onChange={(event) => setEditForm((current) => ({ ...current, username: event.target.value }))}
               />
-              <TextField
-                label="Password baru"
-                name="edit-password"
-                type="password"
-                autoComplete="new-password"
-                placeholder={isOwnAccount(editForm.id) ? 'Kosongkan jika tidak diubah' : 'Hanya untuk akun Anda'}
-                value={isOwnAccount(editForm.id) ? editForm.password : ''}
-                onChange={(event) => setEditForm((current) => ({ ...current, password: event.target.value }))}
-                required={false}
-                disabled={!isOwnAccount(editForm.id)}
-              />
+              {canSetPassword(editForm.id) && (
+                <TextField
+                  label="Password baru"
+                  name="edit-password"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="Kosongkan jika tidak diubah"
+                  value={editForm.password}
+                  onChange={(event) => setEditForm((current) => ({ ...current, password: event.target.value }))}
+                  required={false}
+                />
+              )}
               <div className="flex gap-2">
                 <button className={buttonClass} type="submit" disabled={editForm.loading}>
                   {editForm.loading ? 'Menyimpan...' : 'Simpan'}

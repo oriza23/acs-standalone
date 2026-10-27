@@ -137,7 +137,7 @@ async function loggedInAdminId(req) {
   return rows[0] ? Number(rows[0].id) : null;
 }
 
-const OWN_PASSWORD_ONLY = 'Anda hanya diizinkan mengubah password untuk akun Anda sendiri!';
+const OWN_ACCOUNT_ONLY = 'Anda hanya bisa mengubah akun Anda sendiri!';
 
 router.put('/edit/:id', requireAdmin, async (req, res) => {
   const id = readId(req.params.id);
@@ -164,14 +164,12 @@ router.put('/edit/:id', requireAdmin, async (req, res) => {
   }
 
   try {
-    if (password) {
-      const selfId = await loggedInAdminId(req);
-      if (selfId !== id) {
-        return res.status(403).json({
-          success: false,
-          message: OWN_PASSWORD_ONLY,
-        });
-      }
+    const loggedInId = await loggedInAdminId(req);
+    if (loggedInId !== 1 && loggedInId !== id) {
+      return res.status(403).json({
+        success: false,
+        message: OWN_ACCOUNT_ONLY,
+      });
     }
 
     const [rows] = await pool.execute(
@@ -370,18 +368,22 @@ router.put('/:username', requireAdmin, async (req, res) => {
   }
 
   try {
-    if (password) {
-      const selfId = await loggedInAdminId(req);
-      const [target] = await pool.execute(
-        'SELECT id FROM web_admins WHERE username = ? LIMIT 1',
-        [username],
-      );
-      if (!target[0] || Number(target[0].id) !== selfId) {
-        return res.status(403).json({
-          success: false,
-          message: OWN_PASSWORD_ONLY,
-        });
-      }
+    const loggedInId = await loggedInAdminId(req);
+    const [target] = await pool.execute(
+      'SELECT id FROM web_admins WHERE username = ? LIMIT 1',
+      [username],
+    );
+    if (!target[0]) {
+      return res.status(404).json({
+        success: false,
+        message: 'Admin tidak ditemukan',
+      });
+    }
+    if (loggedInId !== 1 && Number(target[0].id) !== loggedInId) {
+      return res.status(403).json({
+        success: false,
+        message: OWN_ACCOUNT_ONLY,
+      });
     }
 
     const [result] = password
