@@ -27,7 +27,9 @@ app.use(express.json());
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, startedAt: BOOTED_AT });
 });
-app.use('/api/auth', require('./backend/routes/auth'));
+const authRouter = require('./backend/routes/auth');
+app.use('/api/auth', authRouter);
+app.use('/api', authRouter);
 app.use('/api', requireAuth);
 app.use('/api/acs', require('./backend/routes/acs'));
 app.use('/api/routers', require('./backend/routes/routers'));

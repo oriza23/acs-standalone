@@ -25,14 +25,20 @@ function Login() {
     setError('')
 
     try {
-      const response = await api.post('/api/auth/login', {
+      const response = await api.post('/api/login', {
         username: username.trim(),
         password,
       })
 
-      if (response.data?.token) {
-        saveSession(response.data)
+      console.log('Isi Respons Asli:', response.data)
+
+      const payload = response.data
+      const token = payload && typeof payload === 'object' ? payload.token : null
+      if (token) {
+        saveSession(payload)
         navigate('/acs', { replace: true })
+      } else if (typeof payload === 'string') {
+        setError('Respons berupa halaman HTML, bukan JSON API. Jalur /api belum sampai ke backend.')
       } else {
         setError(`Error: Respons login tidak berisi token (Status: ${response.status})`)
       }
