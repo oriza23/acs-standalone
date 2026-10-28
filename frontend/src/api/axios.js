@@ -1,14 +1,20 @@
 import axios from 'axios'
-import { apiBaseUrl } from './apiConfig.js'
 import { clearSession, getToken } from './auth.js'
 
-const api = axios.create({
-  baseURL: apiBaseUrl(),
+const currentHostname = window.location.hostname
+// Cek apakah hostname berupa angka IP (misal 192.168.x.x) atau localhost
+const isLocal = /^[0-9.]+$/.test(currentHostname) || currentHostname === 'localhost'
+
+// Jika lokal, tembak port backend. Jika domain publik, gunakan relative path agar di-handle Reverse Proxy/Cloudflare.
+const API_URL = isLocal ? `http://${currentHostname}:5001` : ''
+
+const apiClient = axios.create({
+  baseURL: API_URL,
   withCredentials: true,
 })
 
 // Tempelkan token JWT otomatis ke setiap request.
-api.interceptors.request.use((config) => {
+apiClient.interceptors.request.use((config) => {
   const token = getToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -17,7 +23,7 @@ api.interceptors.request.use((config) => {
 })
 
 // Token ditolak backend (kedaluwarsa/tidak valid) -> bersihkan sesi dan kembali ke halaman login.
-api.interceptors.response.use(
+apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     const isLoginRequest = error.config?.url?.includes('/api/auth/login')
@@ -31,4 +37,4 @@ api.interceptors.response.use(
   },
 )
 
-export default api
+export default apiClient

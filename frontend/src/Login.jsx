@@ -34,10 +34,17 @@ function Login() {
         saveSession(response.data)
         navigate('/acs', { replace: true })
       } else {
-        setError('Login gagal, token tidak diterima.')
+        setError(`Error: Respons login tidak berisi token (Status: ${response.status})`)
       }
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || requestError.message || 'Login gagal, token tidak diterima.')
+    } catch (error) {
+      console.error('Axios Error:', error)
+      if (error.response) {
+        setError(`Gagal dari server: ${error.response.status} - ${error.response.data?.message || 'Tidak ada detail'}`)
+      } else if (error.request) {
+        setError('Network Error: Server backend tidak merespons (Cek rute API Cloudflare).')
+      } else {
+        setError(`Error: ${error.message}`)
+      }
     } finally {
       setLoading(false)
     }

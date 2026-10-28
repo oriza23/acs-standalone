@@ -14,27 +14,10 @@ app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 5001;
 const BOOTED_AT = Date.now();
 
-const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3})$/i;
-
-function isAllowedOrigin(origin) {
-  if (!origin) {
-    return true;
-  }
-  try {
-    const url = new URL(origin);
-    if (LOCAL_HOST.test(url.hostname)) {
-      return true;
-    }
-    return url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-// credentials tidak boleh memakai origin "*". Origin yang lolos dikembalikan apa adanya.
 app.use(cors({
   origin(origin, callback) {
-    callback(null, isAllowedOrigin(origin) ? origin || true : false);
+    if (!origin) return callback(null, true);
+    return callback(null, origin);
   },
   credentials: true,
 }));
