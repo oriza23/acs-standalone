@@ -1,9 +1,11 @@
 import axios from 'axios'
+import { apiBaseUrl } from './apiConfig.js'
 import { clearSession, getToken } from './auth.js'
 
-const baseURL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:5001`
-
-const api = axios.create({ baseURL })
+const api = axios.create({
+  baseURL: apiBaseUrl(),
+  withCredentials: true,
+})
 
 // Tempelkan token JWT otomatis ke setiap request.
 api.interceptors.request.use((config) => {

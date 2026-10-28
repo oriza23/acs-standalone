@@ -13,8 +13,30 @@ const app = express();
 const PORT = Number(process.env.PORT) || 5001;
 const BOOTED_AT = Date.now();
 
-// Frontend GenieACS berjalan di port 5174 (localhost maupun IP LAN).
-app.use(cors({ origin: '*' }));
+const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3})$/i;
+
+function isAllowedOrigin(origin) {
+  if (!origin) {
+    return true;
+  }
+  try {
+    const url = new URL(origin);
+    if (LOCAL_HOST.test(url.hostname)) {
+      return true;
+    }
+    return url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// credentials tidak boleh memakai origin "*". Origin yang lolos dikembalikan apa adanya.
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, isAllowedOrigin(origin) ? origin || true : false);
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // Login dan ping kesehatan bersifat publik; semua route /api lainnya wajib membawa token JWT.
