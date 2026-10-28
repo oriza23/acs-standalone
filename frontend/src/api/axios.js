@@ -1,8 +1,8 @@
 import axios from 'axios'
 import { clearSession, getToken } from './auth.js'
+import { resolveApiOrigin } from './origin.js'
 
-// Alamat backend: bisa diatur lewat VITE_API_URL, bawaannya server yang sama dengan halaman web (port 5001).
-const baseURL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:5001`
+const baseURL = resolveApiOrigin()
 
 const api = axios.create({ baseURL })
 

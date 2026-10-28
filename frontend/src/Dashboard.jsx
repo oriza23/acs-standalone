@@ -5,8 +5,9 @@ import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContaine
 import Swal from 'sweetalert2'
 import api from './api/axios.js'
 import { getToken } from './api/auth.js'
+import { resolveApiOrigin } from './api/origin.js'
 
-const apiOrigin = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:5001`
+const apiOrigin = resolveApiOrigin()
 const HISTORY_LIMIT = 30
 const RX_COLOR = '#0891b2'
 const TX_COLOR = '#7c3aed'
@@ -265,6 +266,7 @@ function Dashboard() {
     const socket = io(apiOrigin, {
       auth: { token },
       transports: ['websocket', 'polling'],
+      secure: window.location.protocol === 'https:',
     })
     socketRef.current = socket
     socket.on('connect', () => {
