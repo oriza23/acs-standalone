@@ -1,8 +1,7 @@
 import axios from 'axios'
 import { clearSession, getToken } from './auth.js'
-import { resolveApiOrigin } from './origin.js'
 
-const baseURL = resolveApiOrigin()
+const baseURL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:5001`
 
 const api = axios.create({ baseURL })
 

@@ -2,7 +2,6 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import { hasValidToken } from './api/auth.js'
 import AccountSettings from './AccountSettings.jsx'
 import AppShell from './AppShell.jsx'
-import Dashboard from './Dashboard.jsx'
 import GenieAcs from './GenieAcs.jsx'
 import Login from './Login.jsx'
 
@@ -23,7 +22,6 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
-            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/acs" element={<GenieAcs />} />
             <Route path="/akun" element={<AccountSettings />} />
           </Route>

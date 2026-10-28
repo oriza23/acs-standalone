@@ -3,7 +3,6 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Swal from 'sweetalert2'
 import { Menu } from 'lucide-react'
 import { clearSession, getUsername } from './api/auth.js'
-import { clearMikrotikMonitor } from './mikrotikSession.js'
 import ThemeToggle from './ThemeToggle.jsx'
 
 const navLinkClass = ({ isActive }) =>
@@ -13,9 +12,6 @@ const navLinkClass = ({ isActive }) =>
   ].join(' ')
 
 function pageLabel(pathname) {
-  if (pathname.startsWith('/dashboard')) {
-    return 'Dashboard'
-  }
   if (pathname.startsWith('/akun')) {
     return 'Akun'
   }
@@ -55,7 +51,6 @@ function AppShell() {
       return
     }
 
-    clearMikrotikMonitor()
     clearSession()
     navigate('/')
   }
@@ -88,9 +83,6 @@ function AppShell() {
         </div>
 
         <nav className="grid flex-1 content-start gap-1.5 overflow-x-hidden overflow-y-auto pr-1 custom-sidebar-scrollbar" aria-label="Menu utama">
-          <NavLink to="/dashboard" className={navLinkClass}>
-            Dashboard
-          </NavLink>
           <NavLink to="/acs" className={navLinkClass}>
             GenieACS
           </NavLink>
