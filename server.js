@@ -10,6 +10,7 @@ const ensureBootstrapAdmin = require('./backend/bootstrap_admin');
 const { ensureTables: ensureAcsTables } = require('./backend/acs');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 5001;
 const BOOTED_AT = Date.now();
 

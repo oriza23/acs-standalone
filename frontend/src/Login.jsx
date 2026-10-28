@@ -37,11 +37,7 @@ function Login() {
         setError('Login gagal, token tidak diterima.')
       }
     } catch (requestError) {
-      if (requestError.response) {
-        setError(requestError.response.data?.message || 'Username atau password salah')
-      } else {
-        setError('Tidak dapat terhubung ke server.')
-      }
+      setError(requestError.response?.data?.message || requestError.message || 'Login gagal, token tidak diterima.')
     } finally {
       setLoading(false)
     }
