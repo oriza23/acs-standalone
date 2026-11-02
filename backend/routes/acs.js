@@ -8,6 +8,7 @@ const { parseWlanUpdate, planWlanUpdate } = require('../acs_wlan');
 const { parseLanUpdate, planLanUpdate } = require('../acs_lan');
 const { parseWanPpp, parseWanIp, isCommitLoopFault } = require('../acs_wan');
 const { WanFlowError, addWanPpp, addWanIp } = require('../acs_wan_flow');
+const { parseZteWanRequest, zteBindingString } = require('../acs_zte_wan');
 const {
   LIVE_PROJECTION, HOSTS_PROJECTION, WLANS_PROJECTION, LAN_PROJECTION, WANS_PROJECTION,
   extractHosts, extractWlans, extractWans, extractLanConfig, ssidCountOf, summarizeDevice,
@@ -465,18 +466,21 @@ function wanErrorResponse(res, error, fallbackMessage) {
   });
 }
 
-async function handleAddWan(req, res, parse, run, fallbackMessage) {
-  const parsed = parse(req.body);
+// options.body        = pengganti req.body (endpoint khusus merek memetakan inputnya lebih dulu)
+// options.expectProfile = profil merek yang wajib cocok dengan perangkat di ACS
+// options.extend(values) = field tambahan untuk respons sukses
+async function handleAddWan(req, res, parse, run, fallbackMessage, { body = req.body, expectProfile, extend } = {}) {
+  const parsed = parse(body);
   if (parsed.error) {
     return fail(res, 400, parsed.error);
   }
   try {
-    const server = await findServer(req.body?.server_id);
+    const server = await findServer(body?.server_id);
     if (!server) {
       return fail(res, 400, 'Pilih server ACS terlebih dahulu');
     }
-    const result = await run({ server, values: parsed.value, username: req.user?.username });
-    return res.json({ success: true, ...result });
+    const result = await run({ server, values: parsed.value, username: req.user?.username, expectProfile });
+    return res.json({ success: true, ...result, ...(extend ? extend(parsed.value) : {}) });
   } catch (error) {
     return wanErrorResponse(res, error, fallbackMessage);
   }
@@ -487,6 +491,31 @@ async function handleAddWan(req, res, parse, run, fallbackMessage) {
 // wanPath kosong membuat instance baru (AddObject) lalu setParameterValues (Queue-and-Fire, acs_wan_flow.js).
 // Hanya admin. Sandi tidak dicatat di log.
 router.post('/wan-ppp', requireAdmin, (req, res) => handleAddWan(req, res, parseWanPpp, addWanPpp, 'Gagal mengirim koneksi WAN PPP'));
+
+// Buat koneksi WAN khusus ZTE (F609/F670L). Input ringkas -> alur WAN PPP yang sama dengan /wan-ppp:
+//   1. AddObject ...WANConnectionDevice.            (instance baru ditangkap dari response / selisih pohon)
+//   2. AddObject ...WANConnectionDevice.[N].WANPPPConnection.
+//   3. SetParameterValues atomik (Enable terakhir): ConnectionType, Name, Username/Password, NAT,
+//      X_ZTE-COM_ServiceList, X_ZTE-COM_VLANEnable/VLANID/8021P, X_ZTE-COM_LanInterface
+//   Gagal di langkah 2/3 -> instance baru di-rollback (DeleteObject) dan error dikembalikan ke klien.
+// Body: { server_id, deviceId, type: 'pppoe'|'bridge', name, username?, password?, vlanId?, priority?,
+//         serviceList?, enable?, nat?, ports?: ['LAN1','SSID1'] }
+// Respons: 400 input tidak valid | 404 perangkat tidak ada | 409 bukan ZTE / diblokir guard |
+//          502 ONU atau GenieACS menolak (rollbackNote menjelaskan nasib instance) | 500 lainnya.
+router.post('/zte/wan', requireAdmin, (req, res) => {
+  const adapted = parseZteWanRequest(req.body);
+  if (adapted.error) {
+    return fail(res, 400, adapted.error);
+  }
+  return handleAddWan(req, res, parseWanPpp, addWanPpp, 'Gagal membuat koneksi WAN ZTE', {
+    body: adapted.body,
+    expectProfile: 'zte',
+    extend: () => ({
+      type: adapted.type,
+      binding: { ports: adapted.labels, value: zteBindingString(adapted.labels) || null },
+    }),
+  });
+});
 
 // Buat atau ubah koneksi WAN IP (WANIPConnection). IP_Routed memakai DHCP atau Static.
 // IP_Bridged tidak mengirim alamat IP. Gagal setParameterValues menghapus instance baru.

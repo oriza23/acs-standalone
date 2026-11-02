@@ -992,6 +992,15 @@ async function readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionI
   return numericInstanceKeys(connectionNode);
 }
 
+// Subtree mentah dari DB ACS (tanpa menyentuh ONU). Dipakai setelah refreshObject untuk membandingkan
+// nilai yang benar-benar dilaporkan ONU dengan yang kita kirim.
+async function readWanSubtree(server, deviceId, path) {
+  const projection = String(path || '').replace(/\.+$/, '');
+  const query = new URLSearchParams({ query: JSON.stringify({ _id: deviceId }), projection });
+  const { data } = await nbiRequest(server, 'GET', `/devices/?${query}`, { timeout: 8000 });
+  return Array.isArray(data) ? (data[0] || null) : null;
+}
+
 // Indeks sebelum AddObject dibaca bersamaan dengan AddObject (bukan berurutan): pembacaan DB ACS selesai
 // jauh sebelum ONU membuat instance, jadi hasilnya tetap "sebelum". Hanya ditunggu bila response AddObject
 // tanpa instanceNumber. Gagal baca = daftar kosong.
@@ -1165,12 +1174,45 @@ async function createTr181PppInstance(server, deviceId) {
   return { connectionPath: pppPath, pppPath, rollbackPath: pppPath };
 }
 
-async function createWanPppInstance(server, deviceId, options) {
-  if (options.tr181 || options.profile === 'tr181') {
-    return createTr181PppInstance(server, deviceId);
+const WAN_SLOTS_FULL = /9004|resources? exceeded/i;
+
+// AddObject WANConnectionDevice. Nomor instance dari response; bila tidak ada, dari selisih pohon ACS.
+// 9004 (Resources exceeded) berarti slot WANConnectionDevice ONU habis: dijelaskan, bukan dilempar mentah.
+async function addWanConnectionDevice(server, deviceId, wanDeviceIndex, deviceRoot) {
+  const beforePromise = startIndexRead(() => readWanChildIndexes(server, deviceId, wanDeviceIndex));
+  let created;
+  try {
+    created = await sendWanAddObject(server, deviceId, `${deviceRoot}.`);
+  } catch (error) {
+    if (error instanceof NbiError && WAN_SLOTS_FULL.test(error.message)) {
+      throw new NbiError(
+        `Slot WANConnectionDevice ONU sudah penuh dan tidak ada wadah kosong yang bisa dipakai ulang (${error.message}). Hapus WAN yang tidak terpakai atau reset ONU.`,
+        undefined,
+        'FAULT',
+      );
+    }
+    throw error;
   }
-  const { wanDeviceIndex, createConnectionDevice } = options;
-  const createdConnectionDevice = Boolean(createConnectionDevice || !options.connectionIndex);
+  const connectionIndex = created.instanceNumber || await resolveNewIndex(
+    () => readWanChildIndexes(server, deviceId, wanDeviceIndex),
+    await beforePromise,
+  );
+  if (!connectionIndex) {
+    throw new NbiError(
+      `AddObject ${deviceRoot}. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
+      undefined,
+      'FAULT',
+    );
+  }
+  return connectionIndex;
+}
+
+// Dua langkah TR-098: (1) WANConnectionDevice, dilewati bila options.connectionIndex sudah ada (wadah yang dipakai
+// ulang: ZTE/Huawei, atau wadah kosong Fiberhome); (2) AddObject childName ('WANPPPConnection' | 'WANIPConnection')
+// di dalam wadah itu. Wadah kosong hasil pembacaan ACS bisa basi (ONU sudah menghapusnya): bila AddObject anak
+// ditolak, dibuat satu wadah baru lalu diulang. rollbackPath = wadah bila kita yang membuatnya, selain itu anaknya.
+async function createWanConnectionInstance(server, deviceId, options, childName) {
+  const { wanDeviceIndex } = options;
   if (!wanDeviceIndex) {
     throw new NbiError(
       'Struktur WAN tidak ditemukan pada perangkat. Jalankan Summon lalu coba lagi.',
@@ -1180,41 +1222,51 @@ async function createWanPppInstance(server, deviceId, options) {
   }
   const deviceRoot = `InternetGatewayDevice.WANDevice.${wanDeviceIndex}.WANConnectionDevice`;
   let connectionIndex = options.connectionIndex || null;
-  if (createdConnectionDevice || !connectionIndex) {
-    const beforePromise = startIndexRead(() => readWanChildIndexes(server, deviceId, wanDeviceIndex));
-    const created = await sendWanAddObject(server, deviceId, `${deviceRoot}.`);
-    connectionIndex = created.instanceNumber || await resolveNewIndex(
-      () => readWanChildIndexes(server, deviceId, wanDeviceIndex),
-      await beforePromise,
+  let createdConnectionDevice = Boolean(options.createConnectionDevice || !connectionIndex);
+  if (createdConnectionDevice) {
+    connectionIndex = await addWanConnectionDevice(server, deviceId, wanDeviceIndex, deviceRoot);
+  }
+
+  const addChild = async (index) => {
+    const before = startIndexRead(() => readWanChildIndexes(server, deviceId, wanDeviceIndex, index, childName));
+    const created = await sendWanAddObject(server, deviceId, `${deviceRoot}.${index}.${childName}.`);
+    const childIndex = created.instanceNumber || await resolveNewIndex(
+      () => readWanChildIndexes(server, deviceId, wanDeviceIndex, index, childName),
+      await before,
     );
-    if (!connectionIndex) {
+    if (!childIndex) {
       throw new NbiError(
-        `AddObject ${deviceRoot}. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
+        `AddObject ${deviceRoot}.${index}.${childName}. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
         undefined,
         'FAULT',
       );
     }
-  }
-  const beforePpp = startIndexRead(() => readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex));
-  const createdPpp = await sendWanAddObject(server, deviceId, `${deviceRoot}.${connectionIndex}.WANPPPConnection.`);
-  const pppIndex = createdPpp.instanceNumber || await resolveNewIndex(
-    () => readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex),
-    await beforePpp,
-  );
-  if (!pppIndex) {
-    throw new NbiError(
-      `AddObject ${deviceRoot}.${connectionIndex}.WANPPPConnection. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
-      undefined,
-      'FAULT',
-    );
+    return childIndex;
+  };
+
+  let childIndex;
+  try {
+    childIndex = await addChild(connectionIndex);
+  } catch (error) {
+    if (!options.reusedEmpty || createdConnectionDevice || !(error instanceof NbiError) || error.code !== 'FAULT') {
+      throw error;
+    }
+    console.warn(`[ACS wan] ${deviceId}: wadah kosong ${connectionIndex} ditolak ONU (${error.message}); membuat wadah baru`);
+    connectionIndex = await addWanConnectionDevice(server, deviceId, wanDeviceIndex, deviceRoot);
+    createdConnectionDevice = true;
+    childIndex = await addChild(connectionIndex);
   }
   const connectionPath = `${deviceRoot}.${connectionIndex}.`;
-  const pppPath = `${connectionPath}WANPPPConnection.${pppIndex}.`;
-  return {
-    connectionPath,
-    pppPath,
-    rollbackPath: createdConnectionDevice ? connectionPath : pppPath,
-  };
+  const childPath = `${connectionPath}${childName}.${childIndex}.`;
+  return { connectionPath, childPath, rollbackPath: createdConnectionDevice ? connectionPath : childPath };
+}
+
+async function createWanPppInstance(server, deviceId, options) {
+  if (options.tr181 || options.profile === 'tr181') {
+    return createTr181PppInstance(server, deviceId);
+  }
+  const { connectionPath, childPath, rollbackPath } = await createWanConnectionInstance(server, deviceId, options, 'WANPPPConnection');
+  return { connectionPath, pppPath: childPath, rollbackPath };
 }
 
 // Instance WANIPConnection pada WANConnectionDevice yang sama dengan koneksi yang sudah ada.
@@ -1227,53 +1279,10 @@ async function createWanIpInstance(server, deviceId, options) {
       'FAULT',
     );
   }
-  const { wanDeviceIndex, createConnectionDevice } = options;
-  const createdConnectionDevice = Boolean(createConnectionDevice || !options.connectionIndex);
-  if (!wanDeviceIndex) {
-    throw new NbiError(
-      'Struktur WAN tidak ditemukan pada perangkat. Jalankan Summon lalu coba lagi.',
-      undefined,
-      'FAULT',
-    );
-  }
-  const deviceRoot = `InternetGatewayDevice.WANDevice.${wanDeviceIndex}.WANConnectionDevice`;
-  let connectionIndex = options.connectionIndex || null;
-  if (createdConnectionDevice || !connectionIndex) {
-    const beforePromise = startIndexRead(() => readWanChildIndexes(server, deviceId, wanDeviceIndex));
-    const created = await sendWanAddObject(server, deviceId, `${deviceRoot}.`);
-    connectionIndex = created.instanceNumber || await resolveNewIndex(
-      () => readWanChildIndexes(server, deviceId, wanDeviceIndex),
-      await beforePromise,
-    );
-    if (!connectionIndex) {
-      throw new NbiError(
-        `AddObject ${deviceRoot}. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
-        undefined,
-        'FAULT',
-      );
-    }
-  }
-  const beforeIp = startIndexRead(() => readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex, 'WANIPConnection'));
-  const createdIp = await sendWanAddObject(server, deviceId, `${deviceRoot}.${connectionIndex}.WANIPConnection.`);
-  const ipIndex = createdIp.instanceNumber || await resolveNewIndex(
-    () => readWanChildIndexes(server, deviceId, wanDeviceIndex, connectionIndex, 'WANIPConnection'),
-    await beforeIp,
-  );
-  if (!ipIndex) {
-    throw new NbiError(
-      `AddObject ${deviceRoot}.${connectionIndex}.WANIPConnection. selesai tanpa nomor instance. Path ini mungkin tidak ada pada model ONU.`,
-      undefined,
-      'FAULT',
-    );
-  }
-  const connectionPath = `${deviceRoot}.${connectionIndex}.`;
-  const ipPath = `${connectionPath}WANIPConnection.${ipIndex}.`;
-  return {
-    connectionPath,
-    ipPath,
-    rollbackPath: createdConnectionDevice ? connectionPath : ipPath,
-  };
+  const { connectionPath, childPath, rollbackPath } = await createWanConnectionInstance(server, deviceId, options, 'WANIPConnection');
+  return { connectionPath, ipPath: childPath, rollbackPath };
 }
+
 
 // Menghapus satu instance objek TR-069 (DeleteObject). Titik di akhir path dibuang.
 // Hasil: { applied: true } bila ONU sudah menghapus, { applied: false } bila hanya diantrikan.
@@ -1316,6 +1325,7 @@ module.exports = {
   sendWanDeleteObject,
   sendDeleteObject,
   readWanTarget,
+  readWanSubtree,
   wanTimer,
   createWanPppInstance,
   createWanIpInstance,

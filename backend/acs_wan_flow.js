@@ -12,6 +12,7 @@ const {
   planWanPpp, planWanIp, connectionTypeError, connectionPathOf, vendorProfile, batchWanParameters,
   splitWanParameters, connectionLeavesFor, readOnlyLeavesFor, ctcomWanIndexGuard, cmccGuard,
   zteVlanFallbackPayloads, isStructuralRejection, prefersAtomicWan, isCommitLoopFault, omitBridgeAuth,
+  atomicIncludesName, compareWanReadback,
 } = require('./acs_wan');
 
 class WanFlowError extends Error {
@@ -56,10 +57,15 @@ function atomicKeyOf(manufacturer, productModel) {
 
 // Satu percobaan Queue-and-Fire: pecah baris menjadi inti + berisiko, tambahkan Connection Name sebagai
 // task berisiko terakhir. Mode atomik: semuanya satu RPC (Name sebelum Enable).
-function fireAttempt(server, deviceId, rows, nameRows, atomic) {
+function fireAttempt(server, deviceId, rows, nameRows, atomic, profile) {
   if (atomic) {
-    const { core } = splitWanParameters([...rows, ...nameRows], { atomic: true });
-    return acs.queueAndFireWanBatch(server, deviceId, { core, risky: [] });
+    // Semua parameter satu SetParameterValues, Enable paling akhir. Fiberhome: Name tetap task terpisah.
+    const inlineName = atomicIncludesName(profile);
+    const { core } = splitWanParameters(inlineName ? [...rows, ...nameRows] : rows, { atomic: true });
+    return acs.queueAndFireWanBatch(server, deviceId, {
+      core,
+      risky: inlineName ? [] : nameRows.map((row) => [row]),
+    });
   }
   const { core, risky } = splitWanParameters(rows);
   return acs.queueAndFireWanBatch(server, deviceId, {
@@ -101,7 +107,7 @@ async function pushWithFallback(server, deviceId, plan, payload, label, prepare,
     for (;;) {
       try {
         // eslint-disable-next-line no-await-in-loop
-        const result = await fireAttempt(server, deviceId, attempt.rows, nameRows, atomic);
+        const result = await fireAttempt(server, deviceId, attempt.rows, nameRows, atomic, plan?.profile);
         return { ...result, atomic };
       } catch (error) {
         lastError = error;
@@ -141,6 +147,63 @@ function summarizeRisky(risky, plan) {
     notes.push('Nama koneksi dibuat otomatis oleh ONU');
   }
   return { partial: rejected.length > 0, notes };
+}
+
+const VERIFY_BUDGET_MS = 9000;
+const VERIFY_READ_ATTEMPTS = 5;
+const VERIFY_READ_GAP_MS = 800;
+
+// Fase 4 (Fiberhome): "task hilang dari antrean GenieACS" hanya berarti ONU membalas RPC. Untuk memastikan WAN
+// benar-benar ada, ONU diminta melaporkan ulang instance itu (refreshObject = GetParameterValues ke ONU),
+// lalu nilainya dibandingkan dengan yang dikirim.
+// Catatan terukur: refreshObject ke path yang TIDAK ada pada ONU tetap dilaporkan berhasil (tanpa fault), jadi
+// "ada/tidak" ditentukan dari isi pohon: Enable dan ConnectionType yang kita tulis harus terbaca kembali.
+//   state 'absent'   = setelah refresh tidak ada leaf instance   -> caller melempar error + rollback
+//   state 'mismatch' = instance ada, sebagian nilai berbeda       -> sukses parsial dengan rincian
+//   state 'ok'       = semua nilai yang dikirim terbaca sama
+//   state 'unknown'  = ONU tak menjawab dalam batas waktu         -> sukses dengan catatan belum terverifikasi
+async function verifyOnOnu(server, deviceId, wanPath, connectionPath, payload) {
+  let refresh;
+  try {
+    refresh = await acs.refreshDeviceObjects(server, deviceId, [String(wanPath).replace(/\.+$/, '')], { budgetMs: VERIFY_BUDGET_MS });
+  } catch (error) {
+    return { state: 'unknown', reason: error.message };
+  }
+  if (refresh.refreshed.length === 0) {
+    return { state: 'unknown', reason: refresh.failed[0]?.reason || 'ONU belum menjawab pembacaan ulang' };
+  }
+  // Data hasil refresh ditulis GenieACS di akhir sesi: baca beberapa kali sebelum menyimpulkan instance hilang.
+  let comparison = null;
+  for (let attempt = 0; attempt < VERIFY_READ_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => { setTimeout(resolve, VERIFY_READ_GAP_MS); });
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const doc = await acs.readWanSubtree(server, deviceId, connectionPath).catch(() => null);
+    if (!doc) {
+      return { state: 'unknown', reason: 'hasil pembacaan ulang tidak bisa diambil dari GenieACS' };
+    }
+    comparison = compareWanReadback(doc, payload);
+    if (!(comparison.missing.includes('Enable') && comparison.missing.includes('ConnectionType'))) {
+      return { state: comparison.mismatched.length > 0 ? 'mismatch' : 'ok', ...comparison };
+    }
+  }
+  return { state: 'absent', reason: 'Enable dan ConnectionType tidak terbaca dari ONU setelah pembacaan ulang.' };
+}
+
+function verificationNotes(verification) {
+  if (verification.state === 'ok') {
+    return { partial: false, verified: true, notes: ['Terverifikasi: ONU melaporkan nilai yang sama'] };
+  }
+  if (verification.state === 'mismatch') {
+    const detail = verification.mismatched.map((item) => `${item.name}=${JSON.stringify(item.actual)} (dikirim ${JSON.stringify(item.expected)})`).join(', ');
+    return { partial: true, verified: false, notes: [`ONU melaporkan nilai berbeda: ${detail}`] };
+  }
+  if (verification.state === 'unknown') {
+    return { partial: false, verified: false, notes: [`Belum terverifikasi dari ONU (${verification.reason})`] };
+  }
+  return { partial: false, verified: false, notes: [] };
 }
 
 function readTargetLeaves(target, fresh, connectionPath) {
@@ -200,6 +263,7 @@ const WAN_KINDS = {
       wanDeviceIndex: target.wanDeviceIndex,
       connectionIndex: target.connectionIndex,
       createConnectionDevice: target.createConnectionDevice,
+      reusedEmpty: target.reusedEmpty,
     }),
     buildPlan: ({ target, ...args }) => planWanPpp({ ...args, dataModel: target.tr181 ? 'Device' : target.model }),
   },
@@ -223,6 +287,7 @@ const WAN_KINDS = {
       wanDeviceIndex: target.wanDeviceIndex,
       connectionIndex: target.connectionIndex,
       createConnectionDevice: target.createConnectionDevice,
+      reusedEmpty: target.reusedEmpty,
     }),
     buildPlan: ({ target, ...args }) => planWanIp({ ...args, dataModel: target.model }),
   },
@@ -231,7 +296,9 @@ const WAN_KINDS = {
 // Hasil sukses: { wanPath, applied, partial, message, summary }.
 // Gagal: melempar WanFlowError / NbiError / Error biasa. Pada error non-guard, properti `wanPath` diisi bila
 // instance baru gagal di-rollback (supaya UI tahu ada sisa) dan `rollbackNote` berisi catatan rollback.
-async function runWan(cfg, { server, values, username }) {
+// expectProfile (opsional, mis. 'zte'): menolak perangkat yang mereknya di ACS bukan profil itu SEBELUM
+// ada AddObject, supaya endpoint khusus merek tidak membuat WAN di ONU yang salah.
+async function runWan(cfg, { server, values, username, expectProfile }) {
   const timer = acs.wanTimer();
   const deviceId = values.deviceId;
   let wanPath = values.wanPath;
@@ -247,6 +314,9 @@ async function runWan(cfg, { server, values, username }) {
       throw new WanFlowError(404, 'Perangkat tidak ditemukan di GenieACS');
     }
     const manufacturer = target.manufacturer || values.manufacturer;
+    if (expectProfile && vendorProfile(manufacturer) !== expectProfile) {
+      throw new WanFlowError(409, `Perangkat ini bukan ${expectProfile.toUpperCase()} (merek terbaca di ACS: ${manufacturer || 'tidak diketahui'}). Gunakan endpoint WAN yang sesuai merek.`);
+    }
     const modelName = cfg.modelName(target, values);
     cfg.precheck(target, values, manufacturer);
     console.log(`[ACS ${cfg.label}] pohon ${deviceId}: model=${modelName || target.model} WANDevice=${target.wanDeviceIndex || '-'} WANConnectionDevice=${target.connectionIndex || 'baru'}`);
@@ -290,12 +360,30 @@ async function runWan(cfg, { server, values, username }) {
     const result = await pushWithFallback(server, deviceId, plan, payload, cfg.label, prepare, { atomicKey, nativeStructure });
     timer.mark('set');
 
-    const { partial, notes } = summarizeRisky(result.risky, plan);
+    // Fase 4: ONU harus benar-benar memiliki WAN-nya sebelum frontend menerima 200.
+    let verification = { state: 'skipped' };
+    if (plan.profile === 'fiberhome') {
+      verification = await verifyOnOnu(server, deviceId, wanPath, connectionPath, payload);
+      timer.mark('verifikasi');
+      if (verification.state === 'absent') {
+        throw new acs.NbiError(
+          `ONU membalas perintah tetapi ${wanPath} tidak ada pada ONU, WAN tidak terbentuk. ${verification.reason}`,
+          undefined,
+          'FAULT',
+        );
+      }
+    }
+    const checked = verificationNotes(verification);
+
+    const summary = summarizeRisky(result.risky, plan);
+    const partial = summary.partial || checked.partial;
+    const notes = [...summary.notes, ...checked.notes];
     console.log(`[ACS ${cfg.label}] ${username || '-'} ${server.host}:${server.port} ${deviceId} ${plan.profile} ${wanPath} ${plan.fields.join(', ')} (diterapkan, ${result.atomic ? 'atomik' : 'terpisah'}) waktu[${timer.summary()}]`);
     return {
       wanPath,
       applied: true,
       partial,
+      verified: checked.verified,
       message: [`Koneksi ${cfg.title} diterapkan ke ONU`, ...notes].join('. '),
     };
   } catch (error) {
@@ -326,5 +414,6 @@ module.exports = {
   WanFlowError,
   addWanPpp,
   addWanIp,
+  verifyOnOnu,
   rollbackNewWan,
 };

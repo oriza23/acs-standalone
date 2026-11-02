@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
+import { Save } from 'lucide-react'
 import api from './api/axios.js'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import { TIMEZONE_CHANGED_EVENT } from './ServerClock.jsx'
 import ServiceHealth from './ServiceHealth.jsx'
-import './SistemPengaturan.css'
 
-const API = '/api/settings'
+const API = '/settings'
 const DEFAULT_TIMEZONE = 'Asia/Makassar'
 
 const TIMEZONE_OPTIONS = [
@@ -13,6 +14,21 @@ const TIMEZONE_OPTIONS = [
   { value: 'Asia/Makassar', label: 'Asia/Makassar (WITA)' },
   { value: 'Asia/Jayapura', label: 'Asia/Jayapura (WIT)' },
 ]
+
+const SETTING_CARD =
+  'mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md dark:border-slate-700 dark:bg-slate-900'
+
+function syncHeadBadgeClass(synced) {
+  return synced
+    ? 'inline-flex shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+    : 'inline-flex shrink-0 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+}
+
+function rowBadgeClass(ok) {
+  return ok
+    ? 'inline-flex shrink-0 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-800 dark:bg-teal-950/40 dark:text-teal-300'
+    : 'inline-flex shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+}
 
 function SistemPengaturan() {
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE)
@@ -86,15 +102,12 @@ function SistemPengaturan() {
       if (response.data?.status) {
         setStatus(response.data.status)
       }
-      Swal.fire({
-        icon: 'success',
+      await fireSuccess({
         title: 'Berhasil',
         text: 'Zona waktu berhasil diterapkan ke Web, OS, Database, dan FreeRADIUS.',
-        timer: 2000,
-        showConfirmButton: false,
-      })
+      }, () => { loadStatus() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Pengaturan gagal disimpan.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Pengaturan gagal disimpan.' })
       loadStatus()
     } finally {
       setSaving(false)
@@ -111,24 +124,34 @@ function SistemPengaturan() {
   const targetAbbr = TIMEZONE_OPTIONS.find((item) => item.value === status?.target)?.label.match(/\((.+)\)/)?.[1]
 
   return (
-    <section className="setting-page">
-      <header className="setting-header">
-        <p>Sistem</p>
-        <h1>Pengaturan</h1>
+    <section className="mx-auto max-w-3xl pb-8">
+      <header className="mb-2">
+        <p className="m-0 text-xs font-bold tracking-widest text-cyan-700 uppercase dark:text-cyan-400">Sistem</p>
+        <h1 className="m-0 text-3xl font-bold tracking-tight text-slate-900 dark:text-gray-100">Pengaturan</h1>
       </header>
 
-      <form className="setting-card" onSubmit={handleSave}>
-        <h2>Pengaturan Zona Waktu Server</h2>
-        <label className="setting-field">
-          <span>Zona Waktu</span>
-          <select value={timezone} onChange={(event) => setTimezone(event.target.value)} disabled={loading || saving}>
-            {TIMEZONE_OPTIONS.map((item) => (
-              <option key={item.value} value={item.value}>{item.label}</option>
-            ))}
-          </select>
-        </label>
-        <div className="setting-actions">
-          <button type="submit" className="setting-save" disabled={loading || saving}>
+      <form className={SETTING_CARD} onSubmit={handleSave}>
+        <h2 className="m-0 text-lg font-bold text-slate-900 dark:text-gray-100">Pengaturan Zona Waktu Server</h2>
+        <div className="mt-5 flex flex-col gap-4 md:flex-row md:items-end md:gap-4">
+          <label className="grid min-w-0 flex-1 gap-2">
+            <span className="text-xs font-bold text-slate-600 dark:text-gray-400">Zona Waktu</span>
+            <select
+              value={timezone}
+              onChange={(event) => setTimezone(event.target.value)}
+              disabled={loading || saving}
+              className="h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-gray-100"
+            >
+              {TIMEZONE_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="submit"
+            disabled={loading || saving}
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-700 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/40 active:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60 md:min-w-[11rem]"
+          >
+            <Save size={16} strokeWidth={2.25} aria-hidden="true" />
             {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
           </button>
         </div>
@@ -136,36 +159,39 @@ function SistemPengaturan() {
 
       <ServiceHealth />
 
-      <div className="setting-card">
-        <div className="setting-status-head">
-          <h2>Status Sinkronisasi Waktu</h2>
+      <div className={SETTING_CARD}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="m-0 text-lg font-bold text-slate-900 dark:text-gray-100">Status Sinkronisasi Waktu</h2>
           {status && (
-            <span className={status.synced ? 'setting-badge is-ok' : 'setting-badge is-warn'}>
+            <span className={syncHeadBadgeClass(status.synced)}>
               {status.synced ? 'Semua sama' : 'Belum sama'}
             </span>
           )}
         </div>
-        {!status && <p className="setting-hint">Memuat status...</p>}
+        {!status && <p className="mt-4 text-sm text-slate-500 dark:text-gray-400">Memuat status...</p>}
         {status && (
           <>
-            <table className="setting-status-table">
-              <tbody>
-                {statusRows.map((row) => (
-                  <tr key={row.name}>
-                    <td>{row.name}</td>
-                    <td>{row.time || '-'}</td>
-                    <td className={row.abbr === targetAbbr ? 'is-ok' : 'is-warn'}>{row.abbr || '-'}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td>FreeRADIUS</td>
-                  <td>Mengikuti waktu Database &amp; OS</td>
-                  <td className={status.radius?.active ? 'is-ok' : 'is-warn'}>{status.radius?.active ? 'Aktif' : 'Mati'}</td>
-                </tr>
-              </tbody>
-            </table>
+            <ul className="mt-4 divide-y divide-gray-100 dark:divide-slate-800" role="list">
+              {statusRows.map((row) => (
+                <li
+                  key={row.name}
+                  className="grid grid-cols-1 gap-2 py-3.5 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto] sm:items-center sm:gap-4"
+                >
+                  <span className="text-sm font-semibold text-slate-800 dark:text-gray-100">{row.name}</span>
+                  <span className="text-sm text-gray-500 tabular-nums sm:text-center dark:text-gray-400">{row.time || '-'}</span>
+                  <span className={rowBadgeClass(row.abbr === targetAbbr)}>{row.abbr || '-'}</span>
+                </li>
+              ))}
+              <li className="grid grid-cols-1 gap-2 py-3.5 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto] sm:items-center sm:gap-4">
+                <span className="text-sm font-semibold text-slate-800 dark:text-gray-100">FreeRADIUS</span>
+                <span className="text-sm text-gray-500 sm:text-center dark:text-gray-400">Mengikuti waktu Database &amp; OS</span>
+                <span className={rowBadgeClass(status.radius?.active)}>{status.radius?.active ? 'Aktif' : 'Mati'}</span>
+              </li>
+            </ul>
             {!status.synced && (
-              <p className="setting-hint">Waktu belum sama dengan pengaturan. Tekan Simpan Pengaturan untuk menyamakan semuanya.</p>
+              <p className="mt-4 text-sm text-slate-500 dark:text-gray-400">
+                Waktu belum sama dengan pengaturan. Tekan Simpan Pengaturan untuk menyamakan semuanya.
+              </p>
             )}
           </>
         )}

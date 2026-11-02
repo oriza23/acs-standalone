@@ -3,11 +3,12 @@ import api from './api/axios.js'
 import ServerPagination from './ServerPagination.jsx'
 import useDebouncedValue from './useDebouncedValue.js'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import { RefreshCw, Search, Trash, UserX } from 'lucide-react'
 import './HotspotStok.css'
 import './HotspotOnline.css'
 
-const API = '/api/hotspot'
+const API = '/hotspot'
 
 function formatBytes(bytes) {
   const value = Math.max(0, Number(bytes) || 0)
@@ -140,6 +141,14 @@ function HotspotOnline() {
     })
   }
 
+  async function refreshOnlinePage() {
+    const payload = await fetchOnline({ page: currentPage, limit: itemsPerPage, q: searchTerm.trim() })
+    applyPayload(payload)
+    if (payload?.page) {
+      setCurrentPage(payload.page)
+    }
+  }
+
   function payloadTerpilih() {
     const usernames = [...new Set(selectedRows.map((item) => item.username).filter(Boolean))]
     const routers = [...new Set(selectedRows.map((item) => item.router).filter(Boolean))]
@@ -168,15 +177,12 @@ function HotspotOnline() {
     try {
       const response = await api.post(`${API}/kick-user`, payloadTerpilih())
       setSelectedMap({})
-      Swal.fire({
-        icon: 'success',
+      await fireSuccess({
         title: 'Berhasil',
         text: response.data?.message || 'Permintaan kick user diterima',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      }, () => { void refreshOnlinePage() })
     } catch {
-      Swal.fire('Gagal', 'Permintaan kick user gagal dikirim.', 'error')
+      fireError({ title: 'Gagal', text: 'Permintaan kick user gagal dikirim.' })
     }
   }
 
@@ -199,15 +205,12 @@ function HotspotOnline() {
     try {
       const response = await api.post(`${API}/hapus-cookie`, payloadTerpilih())
       setSelectedMap({})
-      Swal.fire({
-        icon: 'success',
+      await fireSuccess({
         title: 'Berhasil',
         text: response.data?.message || 'Permintaan hapus cookie diterima',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      }, () => { void refreshOnlinePage() })
     } catch {
-      Swal.fire('Gagal', 'Permintaan hapus cookie gagal dikirim.', 'error')
+      fireError({ title: 'Gagal', text: 'Permintaan hapus cookie gagal dikirim.' })
     }
   }
 
@@ -222,19 +225,10 @@ function HotspotOnline() {
     })
     try {
       await api.post(`${API}/sync-online`)
-      const payload = await fetchOnline({ page: currentPage, limit: itemsPerPage, q: searchTerm.trim() })
-      applyPayload(payload)
-      setCurrentPage(payload.page || 1)
       setSelectedMap({})
-      Swal.fire({
-        icon: 'success',
-        title: 'Selesai',
-        text: 'Data online berhasil disegarkan.',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      await fireSuccess({ title: 'Selesai', text: 'Data online berhasil disegarkan.' }, () => { void refreshOnlinePage() })
     } catch {
-      Swal.fire('Gagal', 'Data online gagal disegarkan.', 'error')
+      fireError({ title: 'Gagal', text: 'Data online gagal disegarkan.' })
     } finally {
       setSyncing(false)
     }

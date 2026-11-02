@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import api from './api/axios.js'
 import ServerPagination from './ServerPagination.jsx'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import * as XLSX from 'xlsx'
 import { Download, KeyRound, LogIn, Menu, Plus, Search, X } from 'lucide-react'
 
-const API = '/api/pelanggan'
+const API = '/pelanggan'
 
 const actionBtn = 'inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border-0 px-3.5 text-xs font-bold tracking-wide text-white shadow-md transition-colors duration-300'
 const fieldClass = 'grid min-w-0 gap-1.5 text-xs font-semibold tracking-wide text-gray-600 dark:text-gray-300'
@@ -102,7 +104,10 @@ function showPending(title) {
   Swal.fire('Info', `${title} belum terhubung ke akun login pelanggan.`, 'info')
 }
 
-function DataPelanggan({ open, onClose }) {
+function DataPelanggan({ open, onClose, variant = 'overlay' }) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const isPage = variant === 'page'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -110,11 +115,13 @@ function DataPelanggan({ open, onClose }) {
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(10)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [isFormOpen, setIsFormOpen] = useState(() => variant === 'page')
   const [form, setForm] = useState(emptyForm)
   const [userId, setUserId] = useState('')
   const [saving, setSaving] = useState(false)
   const [selectedRows, setSelectedRows] = useState([])
+  const [fotoLampiran, setFotoLampiran] = useState(null)
+  const [fotoPreview, setFotoPreview] = useState('')
   const formOpenRef = useRef(false)
   const onCloseRef = useRef(onClose)
   formOpenRef.current = isFormOpen
@@ -242,8 +249,26 @@ function DataPelanggan({ open, onClose }) {
   function openCreate() {
     setForm(emptyForm())
     setUserId('')
+    setFotoLampiran(null)
+    setFotoPreview('')
     setIsMenuOpen(false)
     setIsFormOpen(true)
+  }
+
+  function handleFotoChange(event) {
+    const file = event.target.files?.[0]
+    setFotoLampiran(file || null)
+    if (!file) {
+      setFotoPreview('')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => setFotoPreview(typeof reader.result === 'string' ? reader.result : '')
+    reader.readAsDataURL(file)
+  }
+
+  function goTambahLangganan() {
+    navigate('/langganan/data', { state: { returnTo: location.pathname } })
   }
 
   function closeForm() {
@@ -274,16 +299,9 @@ function DataPelanggan({ open, onClose }) {
     }
     try {
       await api.put(`${API}/bulk-status`, { ids: selectedRows, status })
-      await refreshRows()
-      Swal.fire({
-        icon: 'success',
-        title: 'Berhasil',
-        text: `Status diubah menjadi ${status}.`,
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      await fireSuccess({ title: 'Berhasil', text: `Status diubah menjadi ${status}.` }, () => { void refreshRows() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Status gagal diubah.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Status gagal diubah.' })
     }
   }
 
@@ -307,16 +325,9 @@ function DataPelanggan({ open, onClose }) {
     }
     try {
       await api.delete(`${API}/bulk-delete`, { data: { ids: selectedRows } })
-      await refreshRows()
-      Swal.fire({
-        icon: 'success',
-        title: 'Terhapus',
-        text: 'Pelanggan terpilih sudah dihapus.',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      await fireSuccess({ title: 'Terhapus', text: 'Pelanggan terpilih sudah dihapus.' }, () => { void refreshRows() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Pelanggan gagal dihapus.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Pelanggan gagal dihapus.' })
     }
   }
 
@@ -390,29 +401,177 @@ function DataPelanggan({ open, onClose }) {
       setForm(emptyForm())
       setIsFormOpen(false)
       setCurrentPage(1)
-      await loadData()
-      Swal.fire({
-        icon: 'success',
+      await fireSuccess({
         title: 'Berhasil',
         text: response.data?.user_id
           ? `Pelanggan disimpan dengan User ID ${response.data.user_id}.`
           : 'Data pelanggan berhasil disimpan.',
-        timer: 1600,
-        showConfirmButton: false,
-      })
+      }, () => { void loadData() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Data pelanggan gagal disimpan.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Data pelanggan gagal disimpan.' })
     } finally {
       setSaving(false)
     }
   }
 
-  if (!open) {
+  useEffect(() => () => {
+    if (fotoPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(fotoPreview)
+    }
+  }, [fotoPreview])
+
+  if (!open && !isPage) {
     return null
   }
 
+  const shellClass = isPage
+    ? 'mx-auto max-w-5xl pb-10 text-gray-900 dark:text-gray-100'
+    : 'fixed inset-0 z-50 h-full w-full overflow-y-auto bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100'
+
+  const registrationForm = isFormOpen && (
+    <div
+      className={isPage
+        ? 'rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800'
+        : 'fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 sm:p-6'}
+      onMouseDown={isPage ? undefined : closeForm}
+    >
+      <div
+        className={isPage
+          ? 'w-full'
+          : 'max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-auto rounded-2xl bg-white text-gray-900 shadow-2xl dark:bg-gray-800 dark:text-gray-100'}
+        role="dialog"
+        aria-modal={!isPage}
+        aria-labelledby="pelanggan-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className={`flex items-start justify-between gap-4 px-6 ${isPage ? 'pt-6' : 'pt-6'}`}>
+          <div>
+            <p className="m-0 text-xs font-bold tracking-[0.12em] text-cyan-700 uppercase dark:text-cyan-300">
+              {isPage ? 'Registrasi' : 'Pelanggan'}
+            </p>
+            <h2 id="pelanggan-modal-title" className="m-0 mt-1 text-xl font-bold tracking-wide">
+              {isPage ? 'Pendaftaran Pelanggan' : 'Tambah Pelanggan'}
+            </h2>
+          </div>
+          {!isPage && (
+            <button
+              type="button"
+              className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg border-0 bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+              aria-label="Tutup"
+              onClick={closeForm}
+            >
+              <X size={18} />
+            </button>
+          )}
+        </header>
+
+        <form className="grid gap-6 px-6 pt-5 pb-6" onSubmit={handleSubmit}>
+          <label className={fieldClass}>
+            <span>User ID</span>
+            <input
+              className="box-border h-10 w-full min-w-0 cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 text-sm font-medium text-gray-500 outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
+              value={userId}
+              readOnly
+              aria-readonly="true"
+              tabIndex={-1}
+            />
+          </label>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <label className={fieldClass}>
+              <span>Nama Pelanggan <span className="text-red-500">*</span></span>
+              <input className={`${controlClass} h-10`} value={form.nama_pelanggan} onChange={(event) => updateField('nama_pelanggan', event.target.value)} maxLength={100} />
+            </label>
+            <label className={fieldClass}>
+              <span>Phone / WhatsApp <span className="text-red-500">*</span></span>
+              <input className={`${controlClass} h-10`} value={form.phone} onChange={(event) => updateField('phone', event.target.value)} maxLength={20} inputMode="tel" />
+            </label>
+            <label className={fieldClass}>
+              <span>Identitas / NIK <span className="text-red-500">*</span></span>
+              <input className={`${controlClass} h-10`} value={form.identitas} onChange={(event) => updateField('identitas', event.target.value)} maxLength={11} inputMode="numeric" />
+            </label>
+            <label className={fieldClass}>
+              <span>NPWP</span>
+              <input className={`${controlClass} h-10`} value={form.npwp} onChange={(event) => updateField('npwp', event.target.value)} maxLength={50} />
+            </label>
+          </div>
+          <label className={fieldClass}>
+            <span>Alamat <span className="text-red-500">*</span></span>
+            <textarea className={`${controlClass} min-h-24 resize-y py-2`} value={form.alamat} onChange={(event) => updateField('alamat', event.target.value)} rows={3} maxLength={30} />
+          </label>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <label className={fieldClass}>
+              <span>Saldo Awal</span>
+              <input className={`${controlClass} h-10`} type="number" min="0" step="0.01" value={form.saldo} onChange={(event) => updateField('saldo', event.target.value)} />
+            </label>
+            <label className={fieldClass}>
+              <span>Mitra</span>
+              <input className={`${controlClass} h-10`} value={form.mitra} onChange={(event) => updateField('mitra', event.target.value)} maxLength={50} />
+            </label>
+          </div>
+
+          <div className="flex flex-col gap-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 dark:border-gray-600 dark:bg-gray-900/40 md:flex-row md:items-center">
+            <div className="min-w-0 flex-1">
+              <p className="m-0 text-xs font-bold tracking-wide text-gray-600 uppercase dark:text-gray-400">Lampiran Foto</p>
+              <label className={`${fieldClass} mt-2`}>
+                <span className="sr-only">Unggah foto lampiran</span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-cyan-700 dark:text-gray-300"
+                  onChange={handleFotoChange}
+                />
+              </label>
+              {fotoPreview && (
+                <img src={fotoPreview} alt="Pratinjau lampiran" className="mt-3 max-h-32 rounded-lg border border-gray-200 object-contain dark:border-gray-600" />
+              )}
+              {fotoLampiran && (
+                <p className="m-0 mt-2 text-xs text-gray-500 dark:text-gray-400">{fotoLampiran.name}</p>
+              )}
+            </div>
+            {isPage && (
+              <button
+                type="button"
+                onClick={goTambahLangganan}
+                className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl border-0 bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 transition-colors hover:bg-blue-700"
+              >
+                Tambah Data Langganan Baru
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            {isPage && (
+              <Link
+                to="/langganan/data"
+                className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-bold text-gray-800 no-underline hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                Data Langganan
+              </Link>
+            )}
+            {!isPage && (
+              <button type="button" className="inline-flex h-10 cursor-pointer items-center rounded-lg border-0 bg-gray-200 px-4 text-sm font-bold text-gray-800 hover:bg-gray-300 disabled:opacity-70 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" onClick={closeForm} disabled={saving}>Batal</button>
+            )}
+            <button type="submit" className="inline-flex h-10 cursor-pointer items-center rounded-lg border-0 bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-70" disabled={saving}>Simpan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+
+  if (isPage) {
+    return (
+      <section className={shellClass}>
+        <header className="mb-6">
+          <p className="m-0 text-xs font-bold tracking-widest text-cyan-700 uppercase dark:text-cyan-400">Langganan</p>
+          <h1 className="m-0 text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Registrasi Pelanggan</h1>
+        </header>
+        {registrationForm}
+      </section>
+    )
+  }
+
   return (
-    <div className="fixed inset-0 z-50 h-full w-full overflow-y-auto bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <div className={shellClass}>
       <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur-sm md:px-6 dark:border-gray-700 dark:bg-gray-900/95">
         <div>
           <p className="m-0 text-xs font-bold tracking-[0.12em] text-cyan-700 uppercase dark:text-cyan-300">Langganan</p>
@@ -590,84 +749,7 @@ function DataPelanggan({ open, onClose }) {
         </div>
       </div>
 
-      {isFormOpen && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 sm:p-6"
-          onMouseDown={closeForm}
-        >
-          <div
-            className="max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-auto rounded-2xl bg-white text-gray-900 shadow-2xl dark:bg-gray-800 dark:text-gray-100"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pelanggan-modal-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header className="flex items-start justify-between gap-4 px-6 pt-6">
-              <div>
-                <p className="m-0 text-xs font-bold tracking-[0.12em] text-cyan-700 uppercase dark:text-cyan-300">Pelanggan</p>
-                <h2 id="pelanggan-modal-title" className="m-0 mt-1 text-xl font-bold tracking-wide">Tambah Pelanggan</h2>
-              </div>
-              <button
-                type="button"
-                className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg border-0 bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
-                aria-label="Tutup"
-                onClick={closeForm}
-              >
-                <X size={18} />
-              </button>
-            </header>
-
-            <form className="grid gap-6 px-6 pt-5 pb-6" onSubmit={handleSubmit}>
-              <label className={fieldClass}>
-                <span>User ID</span>
-                <input
-                  className="box-border h-10 w-full min-w-0 cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 text-sm font-medium text-gray-500 outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                  value={userId}
-                  readOnly
-                  aria-readonly="true"
-                  tabIndex={-1}
-                />
-              </label>
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <label className={fieldClass}>
-                  <span>Nama Pelanggan <span className="text-red-500">*</span></span>
-                  <input className={`${controlClass} h-10`} value={form.nama_pelanggan} onChange={(event) => updateField('nama_pelanggan', event.target.value)} maxLength={100} />
-                </label>
-                <label className={fieldClass}>
-                  <span>Phone / WhatsApp <span className="text-red-500">*</span></span>
-                  <input className={`${controlClass} h-10`} value={form.phone} onChange={(event) => updateField('phone', event.target.value)} maxLength={20} inputMode="tel" />
-                </label>
-                <label className={fieldClass}>
-                  <span>Identitas / NIK <span className="text-red-500">*</span></span>
-                  <input className={`${controlClass} h-10`} value={form.identitas} onChange={(event) => updateField('identitas', event.target.value)} maxLength={11} inputMode="numeric" />
-                </label>
-                <label className={fieldClass}>
-                  <span>NPWP</span>
-                  <input className={`${controlClass} h-10`} value={form.npwp} onChange={(event) => updateField('npwp', event.target.value)} maxLength={50} />
-                </label>
-              </div>
-              <label className={fieldClass}>
-                <span>Alamat <span className="text-red-500">*</span></span>
-                <textarea className={`${controlClass} min-h-24 resize-y py-2`} value={form.alamat} onChange={(event) => updateField('alamat', event.target.value)} rows={3} maxLength={30} />
-              </label>
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <label className={fieldClass}>
-                  <span>Saldo Awal</span>
-                  <input className={`${controlClass} h-10`} type="number" min="0" step="0.01" value={form.saldo} onChange={(event) => updateField('saldo', event.target.value)} />
-                </label>
-                <label className={fieldClass}>
-                  <span>Mitra</span>
-                  <input className={`${controlClass} h-10`} value={form.mitra} onChange={(event) => updateField('mitra', event.target.value)} maxLength={50} />
-                </label>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" className="inline-flex h-10 cursor-pointer items-center rounded-lg border-0 bg-gray-200 px-4 text-sm font-bold text-gray-800 hover:bg-gray-300 disabled:opacity-70 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" onClick={closeForm} disabled={saving}>Batal</button>
-                <button type="submit" className="inline-flex h-10 cursor-pointer items-center rounded-lg border-0 bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-70" disabled={saving}>Simpan</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {registrationForm}
     </div>
   )
 }

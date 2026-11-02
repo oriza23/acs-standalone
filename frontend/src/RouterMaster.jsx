@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import api from './api/axios.js'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import './PppoeProfil.css'
 import './RouterMaster.css'
 
-const API_URL = '/api/routers'
-const SERVER_URL = '/api/routers/servers'
+const API_URL = '/routers'
+const SERVER_URL = '/routers/servers'
 const JENIS_LABEL = { hotspot: 'Hotspot', pppoe: 'PPPoE' }
+
+const MODAL_OVERLAY =
+  'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm'
+const MODAL_CARD =
+  'max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900'
 
 const emptyForm = {
   namaRouter: '',
@@ -28,6 +34,10 @@ function RouterMaster() {
   const [serverForm, setServerForm] = useState({ routerId: '', jenis: '', nama: '' })
   const [serverSaving, setServerSaving] = useState(false)
   const [deletingServerId, setDeletingServerId] = useState(null)
+  const [isRouterModalOpen, setIsRouterModalOpen] = useState(false)
+  const [isServerModalOpen, setIsServerModalOpen] = useState(false)
+  const [isEditServerModalOpen, setIsEditServerModalOpen] = useState(false)
+  const [editServerData, setEditServerData] = useState(null)
 
   async function fetchRouters() {
     const response = await api.get(API_URL)
@@ -82,6 +92,11 @@ function RouterMaster() {
     setForm(emptyForm)
   }
 
+  function closeRouterModal() {
+    resetForm()
+    setIsRouterModalOpen(false)
+  }
+
   function handleEdit(item) {
     setEditMode(true)
     setSelectedId(item.id)
@@ -91,21 +106,15 @@ function RouterMaster() {
       secret: item.secret || '',
       deskripsi: item.deskripsi || '',
     })
+    setIsRouterModalOpen(true)
   }
 
-  function notifySuccess(text) {
-    Swal.fire({
-      icon: 'success',
-      title: 'Berhasil!',
-      text,
-      timer: 1500,
-      showConfirmButton: false,
-    })
+  function notifySuccess(text, refresh) {
+    return fireSuccess({ title: 'Berhasil!', text }, refresh)
   }
 
   function notifyError(errorResponse, fallback) {
-    Swal.fire({
-      icon: 'error',
+    return fireError({
       title: 'Gagal',
       text: errorResponse?.response?.data?.message || fallback,
     })
@@ -141,8 +150,8 @@ function RouterMaster() {
         await api.post(API_URL, payload)
       }
       resetForm()
-      await fetchRouters()
-      notifySuccess('Data sukses diperbarui')
+      setIsRouterModalOpen(false)
+      await notifySuccess('Data sukses diperbarui', () => { void fetchRouters() })
     } catch (requestError) {
       notifyError(requestError, editMode ? 'Gagal menyimpan perubahan.' : 'Gagal menyimpan router.')
     } finally {
@@ -168,9 +177,9 @@ function RouterMaster() {
       await api.delete(`${API_URL}/${item.id}`)
       if (selectedId === item.id) {
         resetForm()
+        setIsRouterModalOpen(false)
       }
-      await Promise.all([fetchRouters(), fetchServers()])
-      notifySuccess('Data sukses diperbarui')
+      await notifySuccess('Data sukses diperbarui', () => { void Promise.all([fetchRouters(), fetchServers()]) })
     } catch (requestError) {
       notifyError(requestError, 'Gagal menghapus router.')
     } finally {
@@ -180,6 +189,25 @@ function RouterMaster() {
 
   function updateServerField(key, value) {
     setServerForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateEditServerField(key, value) {
+    setEditServerData((current) => (current ? { ...current, [key]: value } : current))
+  }
+
+  function closeEditServerModal() {
+    setIsEditServerModalOpen(false)
+    setEditServerData(null)
+  }
+
+  function openEditServerModal(item) {
+    setEditServerData({
+      id: item.id,
+      routerId: String(item.router_id ?? ''),
+      jenis: item.jenis || '',
+      nama: item.nama || '',
+    })
+    setIsEditServerModalOpen(true)
   }
 
   async function handleServerSubmit(event) {
@@ -203,10 +231,41 @@ function RouterMaster() {
       })
       // Router dan jenis dipertahankan supaya beberapa server bisa diinput berurutan.
       setServerForm((current) => ({ ...current, nama: '' }))
-      await fetchServers()
-      notifySuccess('Server berhasil disimpan')
+      await notifySuccess('Server berhasil disimpan', () => { void fetchServers() })
     } catch (requestError) {
       notifyError(requestError, 'Gagal menyimpan server.')
+    } finally {
+      setServerSaving(false)
+    }
+  }
+
+  async function handleEditServerSubmit(event) {
+    event.preventDefault()
+    if (!editServerData?.id) {
+      return
+    }
+
+    const nama = String(editServerData.nama || '').trim()
+    if (!editServerData.routerId || !editServerData.jenis || !nama) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Data belum lengkap',
+        text: 'Pilih router, jenis server, dan isi nama server.',
+      })
+      return
+    }
+
+    setServerSaving(true)
+    try {
+      await api.put(`${SERVER_URL}/${editServerData.id}`, {
+        router_id: editServerData.routerId,
+        jenis: editServerData.jenis,
+        nama,
+      })
+      closeEditServerModal()
+      await notifySuccess('Server berhasil diperbarui', () => { void fetchServers() })
+    } catch (requestError) {
+      notifyError(requestError, 'Gagal menyimpan perubahan server.')
     } finally {
       setServerSaving(false)
     }
@@ -228,8 +287,7 @@ function RouterMaster() {
     setDeletingServerId(item.id)
     try {
       await api.delete(`${SERVER_URL}/${item.id}`)
-      await fetchServers()
-      notifySuccess('Server berhasil dihapus')
+      await notifySuccess('Server berhasil dihapus', () => { void fetchServers() })
     } catch (requestError) {
       notifyError(requestError, 'Gagal menghapus server.')
     } finally {
@@ -244,74 +302,33 @@ function RouterMaster() {
         <h1>Manajemen Router</h1>
       </header>
 
-      <form className="profil-form" onSubmit={handleSubmit}>
-        <div className="profil-form-heading">
-          <p>{editMode ? 'Ubah data' : 'Router baru'}</p>
-          <h2>{editMode ? 'Edit Router' : 'Tambah Router'}</h2>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="m-0 text-xs font-bold tracking-wider text-cyan-700 uppercase">Data</p>
+          <h2 className="m-0 text-xl font-bold text-slate-900 dark:text-gray-100">Router &amp; Server</h2>
         </div>
-
-        <div className="profil-form-fields">
-          <label className="profil-field">
-            <span>Nama Router</span>
-            <input
-              type="text"
-              name="nama_router"
-              placeholder="Nama router"
-              value={form.namaRouter}
-              onChange={(event) => updateField('namaRouter', event.target.value)}
-              required
-            />
-          </label>
-
-          <label className="profil-field">
-            <span>IP Address</span>
-            <input
-              type="text"
-              name="ip_address"
-              placeholder="192.168.88.1"
-              value={form.ipAddress}
-              onChange={(event) => updateField('ipAddress', event.target.value)}
-              required
-            />
-          </label>
-
-          <label className="profil-field">
-            <span>Secret RADIUS</span>
-            <input
-              type="password"
-              name="secret"
-              placeholder="Secret RADIUS"
-              value={form.secret}
-              onChange={(event) => updateField('secret', event.target.value)}
-              autoComplete="new-password"
-              required
-            />
-          </label>
-
-          <label className="profil-field">
-            <span>Deskripsi</span>
-            <input
-              type="text"
-              name="deskripsi"
-              placeholder="Keterangan router"
-              value={form.deskripsi}
-              onChange={(event) => updateField('deskripsi', event.target.value)}
-            />
-          </label>
-        </div>
-
-        <div className="profil-form-actions">
-          {editMode && (
-            <button className="profil-cancel" type="button" onClick={resetForm} disabled={saving}>
-              Batal
-            </button>
-          )}
-          <button className="profil-save" type="submit" disabled={saving}>
-            {saving ? 'Menyimpan...' : editMode ? 'Simpan Perubahan' : 'Simpan'}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-cyan-600 bg-cyan-600 px-4 text-sm font-bold text-white shadow-sm transition-colors hover:bg-cyan-700"
+            onClick={() => {
+              resetForm()
+              setIsRouterModalOpen(true)
+            }}
+          >
+            + Tambah Router
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-violet-600 bg-violet-600 px-4 text-sm font-bold text-white shadow-sm transition-colors hover:border-violet-700 hover:bg-violet-700 dark:border-violet-500 dark:bg-violet-600 dark:hover:bg-violet-500"
+            onClick={() => setIsServerModalOpen(true)}
+          >
+            + Tambah Server
           </button>
         </div>
-      </form>
+      </div>
 
+      <h3 className="mb-4 text-lg font-bold text-slate-800 dark:text-gray-100">Tabel Data Router</h3>
       <div className="profil-card">
         {loading && <p className="profil-status">Memuat data router...</p>}
         {error && <p className="profil-status profil-error">{error}</p>}
@@ -382,67 +399,7 @@ function RouterMaster() {
         )}
       </div>
 
-      <form className="profil-form" onSubmit={handleServerSubmit}>
-        <div className="profil-form-heading">
-          <p>Server per router</p>
-          <h2>Tambah Server</h2>
-        </div>
-
-        <div className="profil-form-fields">
-          <label className="profil-field">
-            <span>Router</span>
-            <select
-              name="router_id"
-              value={serverForm.routerId}
-              onChange={(event) => updateServerField('routerId', event.target.value)}
-            >
-              <option value="">-Pilih-</option>
-              {routers.map((item) => (
-                <option key={item.id} value={item.id}>{item.nama_router}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="profil-field">
-            <span>Jenis Server</span>
-            <select
-              name="jenis"
-              value={serverForm.jenis}
-              onChange={(event) => updateServerField('jenis', event.target.value)}
-            >
-              <option value="">-Pilih-</option>
-              <option value="hotspot">Hotspot</option>
-              <option value="pppoe">PPPoE</option>
-            </select>
-          </label>
-
-          <label className="profil-field">
-            <span>{serverForm.jenis === 'pppoe' ? 'Service Name' : 'Nama Server'}</span>
-            <input
-              type="text"
-              name="nama"
-              maxLength="100"
-              placeholder={serverForm.jenis === 'pppoe'
-                ? 'Sama dengan PPP > PPPoE Servers > Service Name'
-                : 'Sama dengan IP > Hotspot > Servers > Name'}
-              value={serverForm.nama}
-              onChange={(event) => updateServerField('nama', event.target.value)}
-            />
-          </label>
-        </div>
-
-        <p className="server-hint">
-          Isi persis seperti di MikroTik (huruf besar kecil dibedakan). Hotspot: IP &gt; Hotspot &gt; Servers &gt; Name.
-          PPPoE: PPP &gt; PPPoE Servers &gt; Service Name. Pilihan &quot;ALL SERVER&quot; selalu tersedia di form lain.
-        </p>
-
-        <div className="profil-form-actions">
-          <button className="profil-save" type="submit" disabled={serverSaving}>
-            {serverSaving ? 'Menyimpan...' : 'Simpan Server'}
-          </button>
-        </div>
-      </form>
-
+      <h3 className="mb-4 mt-8 text-lg font-bold text-slate-800 dark:text-gray-100">Tabel Data Server</h3>
       <div className="profil-card">
         {!loading && !error && (
           <div className="profil-table-wrap">
@@ -474,6 +431,13 @@ function RouterMaster() {
                         <div className="profil-actions">
                           <button
                             type="button"
+                            className="profil-edit"
+                            onClick={() => openEditServerModal(item)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
                             className="profil-delete"
                             onClick={() => handleServerDelete(item)}
                             disabled={deletingServerId === item.id}
@@ -490,6 +454,228 @@ function RouterMaster() {
           </div>
         )}
       </div>
+
+      {isRouterModalOpen && (
+        <div className={MODAL_OVERLAY} role="dialog" aria-modal="true" aria-labelledby="router-modal-title">
+          <div className={MODAL_CARD}>
+            <form className="profil-form router-page" onSubmit={handleSubmit}>
+              <div className="profil-form-heading">
+                <p>{editMode ? 'Ubah data' : 'Router baru'}</p>
+                <h2 id="router-modal-title">{editMode ? 'Edit Router' : 'Tambah Router'}</h2>
+              </div>
+
+              <div className="profil-form-fields">
+                <label className="profil-field">
+                  <span>Nama Router</span>
+                  <input
+                    type="text"
+                    name="nama_router"
+                    placeholder="Nama router"
+                    value={form.namaRouter}
+                    onChange={(event) => updateField('namaRouter', event.target.value)}
+                    required
+                  />
+                </label>
+
+                <label className="profil-field">
+                  <span>IP Address</span>
+                  <input
+                    type="text"
+                    name="ip_address"
+                    placeholder="192.168.88.1"
+                    value={form.ipAddress}
+                    onChange={(event) => updateField('ipAddress', event.target.value)}
+                    required
+                  />
+                </label>
+
+                <label className="profil-field">
+                  <span>Secret RADIUS</span>
+                  <input
+                    type="password"
+                    name="secret"
+                    placeholder="Secret RADIUS"
+                    value={form.secret}
+                    onChange={(event) => updateField('secret', event.target.value)}
+                    autoComplete="new-password"
+                    required
+                  />
+                </label>
+
+                <label className="profil-field">
+                  <span>Deskripsi</span>
+                  <input
+                    type="text"
+                    name="deskripsi"
+                    placeholder="Keterangan router"
+                    value={form.deskripsi}
+                    onChange={(event) => updateField('deskripsi', event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <div className="profil-form-actions">
+                <button className="profil-cancel" type="button" onClick={closeRouterModal} disabled={saving}>
+                  Batal
+                </button>
+                <button className="profil-save" type="submit" disabled={saving}>
+                  {saving ? 'Menyimpan...' : editMode ? 'Simpan Perubahan' : 'Simpan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isEditServerModalOpen && editServerData && (
+        <div className={MODAL_OVERLAY} role="dialog" aria-modal="true" aria-labelledby="edit-server-modal-title">
+          <div className={MODAL_CARD}>
+            <form className="profil-form router-page" onSubmit={handleEditServerSubmit}>
+              <div className="profil-form-heading">
+                <p>Ubah server</p>
+                <h2 id="edit-server-modal-title">Edit Server</h2>
+              </div>
+
+              <div className="profil-form-fields">
+                <label className="profil-field">
+                  <span>Router</span>
+                  <select
+                    name="router_id"
+                    value={editServerData.routerId}
+                    onChange={(event) => updateEditServerField('routerId', event.target.value)}
+                  >
+                    <option value="">-Pilih-</option>
+                    {routers.map((routerItem) => (
+                      <option key={routerItem.id} value={routerItem.id}>{routerItem.nama_router}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="profil-field">
+                  <span>Jenis Server</span>
+                  <select
+                    name="jenis"
+                    value={editServerData.jenis}
+                    onChange={(event) => updateEditServerField('jenis', event.target.value)}
+                  >
+                    <option value="">-Pilih-</option>
+                    <option value="hotspot">Hotspot</option>
+                    <option value="pppoe">PPPoE</option>
+                  </select>
+                </label>
+
+                <label className="profil-field">
+                  <span>{editServerData.jenis === 'pppoe' ? 'Service Name' : 'Nama Server'}</span>
+                  <input
+                    type="text"
+                    name="nama"
+                    maxLength="100"
+                    placeholder={editServerData.jenis === 'pppoe'
+                      ? 'Sama dengan PPP > PPPoE Servers > Service Name'
+                      : 'Sama dengan IP > Hotspot > Servers > Name'}
+                    value={editServerData.nama}
+                    onChange={(event) => updateEditServerField('nama', event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <p className="server-hint">
+                Isi persis seperti di MikroTik (huruf besar kecil dibedakan). Hotspot: IP &gt; Hotspot &gt; Servers &gt; Name.
+                PPPoE: PPP &gt; PPPoE Servers &gt; Service Name. Pilihan &quot;ALL SERVER&quot; selalu tersedia di form lain.
+              </p>
+
+              <div className="profil-form-actions">
+                <button
+                  className="profil-cancel"
+                  type="button"
+                  onClick={closeEditServerModal}
+                  disabled={serverSaving}
+                >
+                  Batal
+                </button>
+                <button className="profil-save" type="submit" disabled={serverSaving}>
+                  {serverSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isServerModalOpen && (
+        <div className={MODAL_OVERLAY} role="dialog" aria-modal="true" aria-labelledby="server-modal-title">
+          <div className={MODAL_CARD}>
+            <form className="profil-form router-page" onSubmit={handleServerSubmit}>
+              <div className="profil-form-heading">
+                <p>Server per router</p>
+                <h2 id="server-modal-title">Tambah Server</h2>
+              </div>
+
+              <div className="profil-form-fields">
+                <label className="profil-field">
+                  <span>Router</span>
+                  <select
+                    name="router_id"
+                    value={serverForm.routerId}
+                    onChange={(event) => updateServerField('routerId', event.target.value)}
+                  >
+                    <option value="">-Pilih-</option>
+                    {routers.map((item) => (
+                      <option key={item.id} value={item.id}>{item.nama_router}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="profil-field">
+                  <span>Jenis Server</span>
+                  <select
+                    name="jenis"
+                    value={serverForm.jenis}
+                    onChange={(event) => updateServerField('jenis', event.target.value)}
+                  >
+                    <option value="">-Pilih-</option>
+                    <option value="hotspot">Hotspot</option>
+                    <option value="pppoe">PPPoE</option>
+                  </select>
+                </label>
+
+                <label className="profil-field">
+                  <span>{serverForm.jenis === 'pppoe' ? 'Service Name' : 'Nama Server'}</span>
+                  <input
+                    type="text"
+                    name="nama"
+                    maxLength="100"
+                    placeholder={serverForm.jenis === 'pppoe'
+                      ? 'Sama dengan PPP > PPPoE Servers > Service Name'
+                      : 'Sama dengan IP > Hotspot > Servers > Name'}
+                    value={serverForm.nama}
+                    onChange={(event) => updateServerField('nama', event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <p className="server-hint">
+                Isi persis seperti di MikroTik (huruf besar kecil dibedakan). Hotspot: IP &gt; Hotspot &gt; Servers &gt; Name.
+                PPPoE: PPP &gt; PPPoE Servers &gt; Service Name. Pilihan &quot;ALL SERVER&quot; selalu tersedia di form lain.
+              </p>
+
+              <div className="profil-form-actions">
+                <button
+                  className="profil-cancel"
+                  type="button"
+                  onClick={() => setIsServerModalOpen(false)}
+                  disabled={serverSaving}
+                >
+                  Batal
+                </button>
+                <button className="profil-save" type="submit" disabled={serverSaving}>
+                  {serverSaving ? 'Menyimpan...' : 'Simpan Server'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

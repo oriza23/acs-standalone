@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import api from './api/axios.js'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import {
   Ban,
   CalendarPlus,
@@ -25,8 +26,8 @@ import DataPelanggan from './DataPelanggan.jsx'
 import './HotspotStok.css'
 import './LanggananData.css'
 
-const API = '/api/langganan/data'
-const PROFIL_API = '/api/langganan/profil'
+const API = '/langganan/data'
+const PROFIL_API = '/langganan/profil'
 
 function formFromRow(item) {
   return {
@@ -110,6 +111,66 @@ function showInfo() {
   Swal.fire('Info', 'Fitur ini masuk dalam antrean pembuatan dan belum bisa digunakan.', 'info')
 }
 
+function errorMessage(error, fallback) {
+  return error?.response?.data?.message || fallback
+}
+
+function StatusBadge({ status }) {
+  const label = String(status || 'Aktif').trim() || 'Aktif'
+  if (label === 'Aktif') {
+    return (
+      <span className="inline-flex whitespace-nowrap rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">
+        {label}
+      </span>
+    )
+  }
+  if (label === 'Isolir') {
+    return (
+      <span className="inline-flex whitespace-nowrap rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+        {label}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex whitespace-nowrap rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700">
+      {label}
+    </span>
+  )
+}
+
+function IsolirAksiButton({ item, busy, onToggleIsolir }) {
+  if (item.ktg !== 'PPP') {
+    return null
+  }
+  if (item.status === 'Isolir') {
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        aria-label={`Buka isolir ${item.pelanggan}`}
+        onClick={() => onToggleIsolir(item)}
+        className="rounded-full bg-green-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Buka Isolir
+      </button>
+    )
+  }
+  if (item.status === 'Aktif') {
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        aria-label={`Isolir ${item.pelanggan}`}
+        onClick={() => onToggleIsolir(item)}
+        className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Isolir
+      </button>
+    )
+  }
+  return null
+}
+
 const infoButtons = [
   { label: 'IMPORT', icon: Download, tone: 'tosca' },
   { label: 'SET BILLING', icon: Receipt, tone: 'rose' },
@@ -121,6 +182,8 @@ const infoButtons = [
 
 function LanggananData() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const returnTo = location.state?.returnTo
   const [rows, setRows] = useState([])
   const [profiles, setProfiles] = useState([])
   const [routerServers, setRouterServers] = useState([])
@@ -140,6 +203,7 @@ function LanggananData() {
   const [itemsData, setItemsData] = useState([])
   const [itemsLoading, setItemsLoading] = useState(false)
   const [itemsError, setItemsError] = useState('')
+  const [isolirBusyId, setIsolirBusyId] = useState(null)
   const itemsRequest = useRef(0)
 
   async function loadData() {
@@ -187,7 +251,7 @@ function LanggananData() {
   // Pilihan server berasal dari menu Router; gagal memuat tidak mengganggu halaman.
   useEffect(() => {
     let ignore = false
-    api.get('/api/routers/servers')
+    api.get('/routers/servers')
       .then((response) => {
         if (!ignore) {
           setRouterServers(Array.isArray(response.data) ? response.data : [])
@@ -280,7 +344,7 @@ function LanggananData() {
   // Pendaftaran langganan baru memakai halaman form lengkap, bukan modal.
   function openCreate() {
     setIsMenuOpen(false)
-    navigate('/langganan/tambah')
+    navigate('/langganan/tambah', returnTo ? { state: { returnTo } } : undefined)
   }
 
   function openEdit(item) {
@@ -359,19 +423,16 @@ function LanggananData() {
     try {
       const payload = payloadFromForm()
       await api.put(`${API}/${encodeURIComponent(editingId)}`, payload)
-      await loadData()
-      setIsModalOpen(false)
-      resetForm()
       setSelectedIds([])
-      Swal.fire({
-        icon: 'success',
-        title: 'Berhasil',
-        text: 'Data langganan berhasil diperbarui.',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      if (returnTo) {
+        navigate(returnTo, { replace: true })
+      } else {
+        setIsModalOpen(false)
+        resetForm()
+      }
+      await fireSuccess({ title: 'Berhasil', text: 'Data langganan berhasil diperbarui.' }, () => { void loadData() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Data langganan gagal diperbarui.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Data langganan gagal diperbarui.' })
     } finally {
       setSaving(false)
     }
@@ -402,17 +463,49 @@ function LanggananData() {
     })
     try {
       await Promise.all(selectedRows.map((item) => api.delete(`${API}/${encodeURIComponent(item.id)}`)))
-      await loadData()
       setSelectedIds([])
-      Swal.fire({
-        icon: 'success',
-        title: 'Terhapus',
-        text: 'Data langganan berhasil dihapus.',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      await fireSuccess({ title: 'Terhapus', text: 'Data langganan berhasil dihapus.' }, () => { void loadData() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Data langganan gagal dihapus.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Data langganan gagal dihapus.' })
+    }
+  }
+
+  async function handleToggleIsolir(item) {
+    if (item.ktg !== 'PPP' || (item.status !== 'Aktif' && item.status !== 'Isolir')) {
+      return
+    }
+
+    const sedangIsolir = item.status === 'Isolir'
+    const confirm = await Swal.fire({
+      title: 'Yakin ingin mengubah status pelanggan ini?',
+      text: `${item.pelanggan} (${item.username})`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Ya, lanjutkan',
+      confirmButtonColor: sedangIsolir ? '#059669' : '#e11d48',
+      cancelButtonText: 'Batal',
+    })
+    if (!confirm.isConfirmed) {
+      return
+    }
+
+    setIsolirBusyId(item.id)
+    try {
+      const path = sedangIsolir
+        ? `/buka-isolir/${encodeURIComponent(item.id)}`
+        : `/isolir/${encodeURIComponent(item.id)}`
+      const response = await api.post(path)
+      await fireSuccess({
+        title: 'Berhasil',
+        text: response.data?.message || 'Status pelanggan diperbarui.',
+      }, () => { void loadData() })
+    } catch (requestError) {
+      fireError({
+        title: 'Gagal',
+        text: errorMessage(requestError, 'Gagal mengubah status isolir pelanggan.'),
+      })
+    } finally {
+      setIsolirBusyId(null)
     }
   }
 
@@ -437,17 +530,10 @@ function LanggananData() {
         `${API}/${encodeURIComponent(item.id)}`,
         { ...formFromRow(item), status, profil_id: item.profil_id || null },
       )))
-      await loadData()
       setSelectedIds([])
-      Swal.fire({
-        icon: 'success',
-        title: 'Berhasil',
-        text: `Status diubah menjadi ${status}.`,
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      await fireSuccess({ title: 'Berhasil', text: `Status diubah menjadi ${status}.` }, () => { void loadData() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Status gagal diubah.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Status gagal diubah.' })
     }
   }
 
@@ -557,7 +643,7 @@ function LanggananData() {
                   <th className="stok-check">
                     <input type="checkbox" aria-label="Pilih semua pelanggan" checked={allSelected} onChange={toggleAll} />
                   </th>
-                  <th>INET</th>
+                  <th>STATUS</th>
                   <th>NOLAYANAN</th>
                   <th>PELANGGAN</th>
                   <th>KTG</th>
@@ -591,7 +677,7 @@ function LanggananData() {
                   <th>TOTAL</th>
                   <th>WA</th>
                   <th>INVOICE</th>
-                  <th>NOTE</th>
+                  <th>AKSI</th>
                 </tr>
               </thead>
               <tbody>
@@ -612,10 +698,7 @@ function LanggananData() {
                       />
                     </td>
                     <td>
-                      <span
-                        className={item.status === 'Aktif' ? 'data-inet is-aktif' : 'data-inet'}
-                        title={item.status}
-                      />
+                      <StatusBadge status={item.status} />
                     </td>
                     <td>{tampil(item.nolayanan)}</td>
                     <td>{item.pelanggan}</td>
@@ -685,9 +768,22 @@ function LanggananData() {
                       </button>
                     </td>
                     <td>
-                      <button type="button" className="data-note" aria-label={`Edit ${item.pelanggan}`} onClick={() => openEdit(item)}>
-                        <Pencil size={15} />
-                      </button>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="data-note"
+                          aria-label={`Edit ${item.pelanggan}`}
+                          title="Edit"
+                          onClick={() => openEdit(item)}
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <IsolirAksiButton
+                          item={item}
+                          busy={isolirBusyId === item.id}
+                          onToggleIsolir={handleToggleIsolir}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))}

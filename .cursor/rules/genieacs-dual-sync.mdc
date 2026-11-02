@@ -1,0 +1,19 @@
+---
+description: Sinkronisasi GenieACS ke billing; tetap dua app terpisah untuk deploy berbeda
+globs: backend/acs*.js,backend/routes/acs.js,frontend/src/GenieAcs.jsx,frontend/src/Wan*.jsx,frontend/src/api/acs.js,frontend/src/PortBinding.jsx,test/acs*.test.js
+alwaysApply: false
+---
+
+# GenieACS: acs-standalone ↔ billing
+
+## Dua aplikasi terpisah
+
+Repo ini **bukan** cabang frontend dari billing. Ini **aplikasi sendiri** (backend + frontend + `server.js`) untuk di-deploy ke **server lain**, fokus portal ACS.
+
+**Jangan** digabung dengan billing jadi satu backend atau satu proses Node untuk dua UI.
+
+**Do:** mirror file GenieACS ke/dari `/var/www/billing` agar logic ACS sama.
+
+## Sinkronisasi dua arah
+
+Perubahan GenieACS di sini → salin ke billing. Perubahan di billing → salin ke sini. Selesai task = diff GenieACS bersih (kecuali `api/acs.js` BASE URL).

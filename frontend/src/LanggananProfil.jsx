@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import api from './api/axios.js'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import { Menu, Pencil, Plus, Search, Trash, X } from 'lucide-react'
 import './HotspotStok.css'
 import './LanggananProfil.css'
 
-const API = '/api/langganan/profil'
+const API = '/langganan/profil'
 const TIPE_OPTIONS = ['Rumahan', 'Bisnis', 'Kantor', 'Sekolah']
 const MEDIA_OPTIONS = ['Fiber Optic', 'Wireless', 'LAN', 'Radio']
 const HARGA_PALET = [
@@ -236,20 +237,16 @@ function LanggananProfil() {
       } else {
         await api.post(API, payload)
       }
-      await loadProfiles()
       setIsModalOpen(false)
       setEditingId(null)
       setForm(emptyForm())
       setSelectedIds([])
-      Swal.fire({
-        icon: 'success',
+      await fireSuccess({
         title: 'Berhasil',
         text: editingId ? 'Profil langganan berhasil diperbarui.' : 'Profil langganan berhasil disimpan.',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      }, () => { void loadProfiles() })
     } catch (error) {
-      Swal.fire('Gagal', error.response?.data?.message || 'Profil gagal disimpan.', 'error')
+      fireError({ title: 'Gagal', text: error.response?.data?.message || 'Profil gagal disimpan.' })
     } finally {
       setSaving(false)
     }
@@ -284,17 +281,10 @@ function LanggananProfil() {
     })
     try {
       await Promise.all(selectedRows.map((item) => api.delete(`${API}/${encodeURIComponent(item.id)}`)))
-      await loadProfiles()
       setSelectedIds([])
-      Swal.fire({
-        icon: 'success',
-        title: 'Terhapus',
-        text: 'Profil langganan berhasil dihapus.',
-        timer: 1500,
-        showConfirmButton: false,
-      })
+      await fireSuccess({ title: 'Terhapus', text: 'Profil langganan berhasil dihapus.' }, () => { void loadProfiles() })
     } catch (error) {
-      Swal.fire('Gagal', error.response?.data?.message || 'Profil gagal dihapus.', 'error')
+      fireError({ title: 'Gagal', text: error.response?.data?.message || 'Profil gagal dihapus.' })
     }
   }
 

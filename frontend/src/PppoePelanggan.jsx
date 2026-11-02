@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from './api/axios.js'
 import Swal from 'sweetalert2'
+import { fireSuccess } from './swals.js'
 import './PppoePelanggan.css'
 
 function PppoePelanggan() {
@@ -18,7 +19,7 @@ function PppoePelanggan() {
   const [selectedUsername, setSelectedUsername] = useState('')
 
   async function fetchPelanggan() {
-    const response = await api.get('/api/pppoe/pelanggan')
+    const response = await api.get('/pppoe/pelanggan')
     setPelanggan(Array.isArray(response.data) ? response.data : [])
     setError('')
   }
@@ -28,7 +29,7 @@ function PppoePelanggan() {
 
     async function loadPelanggan() {
       try {
-        const response = await api.get('/api/pppoe/pelanggan')
+        const response = await api.get('/pppoe/pelanggan')
         if (!ignore) {
           setPelanggan(Array.isArray(response.data) ? response.data : [])
           setError('')
@@ -56,7 +57,7 @@ function PppoePelanggan() {
 
     async function loadProfil() {
       try {
-        const response = await api.get('/api/pppoe/profil')
+        const response = await api.get('/pppoe/profil')
         if (ignore) {
           return
         }
@@ -100,14 +101,8 @@ function PppoePelanggan() {
     setFormError('')
   }
 
-  function notifySuccess() {
-    Swal.fire({
-      icon: 'success',
-      title: 'Berhasil!',
-      text: 'Data sukses diperbarui',
-      timer: 1500,
-      showConfirmButton: false,
-    })
+  function notifySuccess(refresh) {
+    return fireSuccess({ title: 'Berhasil!', text: 'Data sukses diperbarui' }, refresh)
   }
 
   async function handleDelete(targetUsername) {
@@ -128,13 +123,12 @@ function PppoePelanggan() {
 
     try {
       await api.delete(
-        `/api/pppoe/pelanggan/${encodeURIComponent(targetUsername)}`,
+        `/pppoe/pelanggan/${encodeURIComponent(targetUsername)}`,
       )
       if (selectedUsername === targetUsername) {
         resetForm()
       }
-      await fetchPelanggan()
-      notifySuccess()
+      await notifySuccess(() => { void fetchPelanggan() })
     } catch {
       setFormError('Gagal menghapus pelanggan.')
     } finally {
@@ -163,19 +157,18 @@ function PppoePelanggan() {
     try {
       if (editMode) {
         await api.put(
-          `/api/pppoe/pelanggan/${encodeURIComponent(selectedUsername)}`,
+          `/pppoe/pelanggan/${encodeURIComponent(selectedUsername)}`,
           { password, paket },
         )
       } else {
-        await api.post('/api/pppoe/pelanggan', {
+        await api.post('/pppoe/pelanggan', {
           username,
           password,
           paket,
         })
       }
       resetForm()
-      await fetchPelanggan()
-      notifySuccess()
+      await notifySuccess(() => { void fetchPelanggan() })
     } catch {
       setFormError(editMode ? 'Gagal menyimpan perubahan.' : 'Gagal menyimpan pelanggan.')
     } finally {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from './api/axios.js'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import { Check, Funnel, List, Menu, Pencil, Plus, Search, Trash, Wifi, X } from 'lucide-react'
 import './HotspotProfil.css'
 
@@ -59,7 +60,7 @@ function HotspotProfil() {
   const [form, setForm] = useState(emptyForm)
 
   async function fetchProfil() {
-    const response = await api.get('/api/hotspot/profil')
+    const response = await api.get('/hotspot/profil')
     return Array.isArray(response.data) ? response.data : []
   }
 
@@ -106,14 +107,8 @@ function HotspotProfil() {
     return () => document.removeEventListener('mousedown', closeMenu)
   }, [isMenuOpen])
 
-  function notifySuccess() {
-    Swal.fire({
-      icon: 'success',
-      title: 'Berhasil!',
-      text: 'Data sukses diperbarui',
-      timer: 1500,
-      showConfirmButton: false,
-    })
+  function notifySuccess(refresh) {
+    return fireSuccess({ title: 'Berhasil!', text: 'Data sukses diperbarui' }, refresh)
   }
 
   function openModal() {
@@ -242,20 +237,20 @@ function HotspotProfil() {
     setSaving(true)
     try {
       if (editingGroup) {
-        await api.put(`/api/hotspot/profil/${encodeURIComponent(editingGroup)}`, payload)
+        await api.put(`/hotspot/profil/${encodeURIComponent(editingGroup)}`, payload)
       } else {
-        await api.post('/api/hotspot/profil', payload)
+        await api.post('/hotspot/profil', payload)
       }
       setIsModalOpen(false)
       setEditingGroup('')
       setForm(emptyForm)
-      const rows = await fetchProfil()
-      setProfil(rows)
       setCurrentPage(1)
-      notifySuccess()
+      await notifySuccess(async () => {
+        const rows = await fetchProfil()
+        setProfil(rows)
+      })
     } catch (requestError) {
-      Swal.fire({
-        icon: 'error',
+      fireError({
         title: 'Gagal',
         text: requestError.response?.data?.message || 'Gagal menyimpan profil.',
       })
@@ -285,18 +280,18 @@ function HotspotProfil() {
     }
 
     try {
-      await api.post('/api/hotspot/profil/delete-massal', {
+      await api.post('/hotspot/profil/delete-massal', {
         groupnames: selectedProfiles,
       })
-      const rows = await fetchProfil()
-      setProfil(rows)
       setSelectedProfiles([])
       setIsMenuOpen(false)
       setCurrentPage(1)
-      notifySuccess()
+      await notifySuccess(async () => {
+        const rows = await fetchProfil()
+        setProfil(rows)
+      })
     } catch (requestError) {
-      Swal.fire({
-        icon: 'error',
+      fireError({
         title: 'Gagal',
         text: requestError.response?.data?.message || 'Gagal menghapus profil.',
       })

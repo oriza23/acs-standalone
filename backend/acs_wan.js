@@ -105,19 +105,33 @@ function normalizeDeviceType(value) {
   return DEVICE_TYPES.includes(compact) ? compact : '';
 }
 
-// Fiberhome membuat nama koneksi sendiri; menulis ...Name membuat ONT membalas 9002 Internal Error.
-// Dilewati bila user memilih Fiberhome ATAU ONU yang sebenarnya terbaca bermerek Fiberhome.
+// Fiberhome (HG6145D2) membuat nama koneksi sendiri, mis. "3_INTERNET_R_VID_2033". Nama bersifat OPSIONAL:
+// kosong / "Otomatis" = ONT yang menamai. Bila diisi, Name tetap dikirim, tetapi sebagai task terpisah
+// (Safe-Write) karena menulis ...Name pernah dibalas ONT dengan 9002 Internal Error.
+const FIBERHOME_AUTO_NAME = 'otomatis';
+
 function skipConnectionName({ deviceType, manufacturer } = {}) {
   return normalizeDeviceType(deviceType) === 'fiberhome' || vendorProfile(manufacturer) === 'fiberhome';
+}
+
+// Nama dari form. Fiberhome: kosong atau "Otomatis" (placeholder UI) berarti nama dibuat ONT => ''.
+// Mengembalikan null bila nama tidak valid (terlalu panjang / karakter kontrol); caller yang memutuskan.
+function readConnectionName(body, deviceType) {
+  const raw = typeof body?.connectionName === 'string' ? body.connectionName.trim() : '';
+  if (deviceType === 'fiberhome' && (!raw || raw.toLowerCase() === FIBERHOME_AUTO_NAME)) {
+    return '';
+  }
+  return readText(raw, 128);
 }
 
 // Connection Name tidak ikut batch utama. Dikirim terpisah (Safe-Write) setelah Username/Password/VLAN
 // berhasil, supaya Name yang read-only/ditolak tidak menggagalkan parameter utama.
 function connectionNameRows(basePath, values, manufacturer) {
-  if (skipConnectionName({ deviceType: values?.deviceType, manufacturer: manufacturer || values?.manufacturer })) {
+  const name = String(values?.connectionName || '').trim();
+  const isAuto = skipConnectionName({ deviceType: values?.deviceType, manufacturer: manufacturer || values?.manufacturer });
+  if (isAuto && name.toLowerCase() === FIBERHOME_AUTO_NAME) {
     return [];
   }
-  const name = String(values?.connectionName || '').trim();
   return name ? [[`${basePath}Name`, name, 'xsd:string']] : [];
 }
 
@@ -213,9 +227,8 @@ function parseWanPpp(body) {
     return { error: deviceTypeError.error };
   }
   const { deviceType } = deviceTypeError;
-  // Fiberhome: nama dibuat ONT sendiri, input 'Otomatis' di form tidak dikirim.
-  const connectionName = deviceType === 'fiberhome' ? '' : readText(body?.connectionName, 128);
-  if (deviceType !== 'fiberhome' && !connectionName) {
+  const connectionName = readConnectionName(body, deviceType);
+  if (connectionName === null || (deviceType !== 'fiberhome' && !connectionName)) {
     return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
   }
   if (typeof body?.enableConnection !== 'boolean' || typeof body?.natStatus !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
@@ -463,8 +476,8 @@ function parseWanIp(body) {
     return { error: deviceTypeError.error };
   }
   const { deviceType } = deviceTypeError;
-  const connectionName = deviceType === 'fiberhome' ? '' : readText(body?.connectionName, 128);
-  if (deviceType !== 'fiberhome' && !connectionName) {
+  const connectionName = readConnectionName(body, deviceType);
+  if (connectionName === null || (deviceType !== 'fiberhome' && !connectionName)) {
     return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
   }
   if (typeof body?.enableConnection !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
@@ -870,9 +883,24 @@ function selectWanLocation(wanDevices, profile) {
     const host = (withPpp.length > 0 ? withPpp : chosen.connections).at(-1);
     connectionIndex = host.index;
   }
+  // Fiberhome menaruh tepat SATU koneksi per WANConnectionDevice (diukur pada 13 ONU: WCD1 = IP TR069, tiap
+  // WAN lain di WCD sendiri), jadi koneksi baru tidak boleh dicampur ke WCD yang sudah berisi. Wadah kosong sisa
+  // WAN yang dihapus dipakai ulang dulu; ONU membatasi jumlah WCD (9004 Resources exceeded) dan cangkang kosong
+  // yang menumpuk menghabiskan slot itu.
+  let reusedEmpty = false;
+  if (profile === 'fiberhome' && !connectionIndex) {
+    const empty = chosen.connections
+      .filter((conn) => conn.ppp.length === 0 && conn.ip.length === 0)
+      .sort((left, right) => Number(left.index) - Number(right.index))[0];
+    if (empty) {
+      connectionIndex = empty.index;
+      reusedEmpty = true;
+    }
+  }
   return {
     wanDeviceIndex: chosen.index,
     connectionIndex,
+    reusedEmpty,
     createConnectionDevice: !connectionIndex,
     accessType: chosen.accessType,
     knownLeaves: chosen.knownLeaves,
@@ -901,11 +929,20 @@ function selectTr181Location(deviceNode) {
   };
 }
 
-function coreParameters(pppPath, values) {
+// ConnectionType TR-098 yang ditulis ke ONU. Fiberhome: TR-098 baku tidak punya nilai "PPPoE_Routed",
+// koneksi PPPoE routed ditulis IP_Routed (mayoritas ONU HG6145D2 di lapangan); bridged tetap PPPoE_Bridged.
+function connectionTypeForOnu(connectionType, { fiberhome = false } = {}) {
+  if (fiberhome && (connectionType === 'pppoe_routed' || connectionType === 'ip-routed' || connectionType === 'ip_routed')) {
+    return 'IP_Routed';
+  }
+  return CONNECTION_TYPE_TR069[connectionType];
+}
+
+function coreParameters(pppPath, values, { fiberhome = false } = {}) {
   const list = [];
   // Satu nilai Enable boolean. ConnectionTrigger dan MTU tidak dikirim.
   push(list, `${pppPath}Enable`, values.enableConnection === true, 'xsd:boolean');
-  push(list, `${pppPath}ConnectionType`, CONNECTION_TYPE_TR069[values.connectionType], 'xsd:string');
+  push(list, `${pppPath}ConnectionType`, connectionTypeForOnu(values.connectionType, { fiberhome }), 'xsd:string');
   if (!isBridgedConnection(values.connectionType)) {
     if (values.username) {
       push(list, `${pppPath}Username`, values.username, 'xsd:string');
@@ -1206,17 +1243,47 @@ function ctcomParameters(ctx) {
   return list;
 }
 
-function fiberhomeParameters(ctx) {
-  const link = `${ctx.connectionPath}X_FH_WAN${accessKind(ctx.accessType)}LinkConfig`;
+// Fiberhome HG6145D2 (diukur pada 19 ONU): VLAN, 802.1p, dan service list disimpan di WANPPPConnection itu
+// sendiri (VLANEnable, VLANID, X_FH_802-1pMark, X_FH_ServiceList). X_FH_WANGponLinkConfig pada
+// WANConnectionDevice tetap Mode=0/VLANID=0 untuk WAN yang berjalan, jadi tidak ditulis. X_BROADCOM_COM_VlanMuxID,
+// X_FH_VLANID, dan X_FH_PortBinding tidak ada pada pohon ONU ini.
+// Firmware Fiberhome lain yang pohon PPP-nya sudah terisi tetapi TIDAK punya VLANID di level PPP memakai
+// link config (perilaku lama).
+function fiberhomeVlanAtLink(knownLeaves) {
+  const known = new Set(Array.isArray(knownLeaves) ? knownLeaves : []);
+  const pppPopulated = known.has('WANPPPConnection.Username') || known.has('WANPPPConnection.ConnectionType');
+  const pppVlan = known.has('WANPPPConnection.VLANID');
+  const linkVlan = [...known].some((name) => /^X_FH_WAN\w*LinkConfig\.VLANID$/.test(name));
+  return pppPopulated && !pppVlan && linkVlan;
+}
+
+function fiberhomeParameters(ctx, knownLeaves) {
   const list = [];
-  push(list, `${link}.Enable`, ctx.vlanStatus ? 1 : 0, 'xsd:unsignedInt');
-  push(list, `${link}.Mode`, ctx.vlanStatus ? 2 : 0, 'xsd:unsignedInt');
-  push(list, `${link}.VLANID`, ctx.vlanId, 'xsd:unsignedInt');
-  push(list, `${link}.VLANIDMark`, ctx.vlanId, 'xsd:unsignedInt');
-  push(list, `${link}.802-1pMark`, ctx.priority, 'xsd:unsignedInt');
   push(list, `${ctx.pppPath}X_FH_ServiceList`, ctx.serviceList, 'xsd:string');
-  push(list, `${ctx.pppPath}X_FH_VLANID`, ctx.vlanId, 'xsd:unsignedInt');
+  if (fiberhomeVlanAtLink(knownLeaves)) {
+    const link = `${ctx.connectionPath}X_FH_WAN${accessKind(ctx.accessType)}LinkConfig`;
+    push(list, `${link}.Enable`, ctx.vlanStatus ? 1 : 0, 'xsd:unsignedInt');
+    push(list, `${link}.Mode`, ctx.vlanStatus ? 2 : 0, 'xsd:unsignedInt');
+    push(list, `${link}.VLANID`, ctx.vlanId, 'xsd:unsignedInt');
+    push(list, `${link}.VLANIDMark`, ctx.vlanId, 'xsd:unsignedInt');
+    push(list, `${link}.802-1pMark`, ctx.priority, 'xsd:unsignedInt');
+    return list;
+  }
+  if (ctx.vlanStatus) {
+    push(list, `${ctx.pppPath}VLANEnable`, true, 'xsd:boolean');
+    push(list, `${ctx.pppPath}VLANID`, ctx.vlanId, 'xsd:unsignedInt');
+    push(list, `${ctx.pppPath}X_FH_802-1pMark`, ctx.priority, 'xsd:unsignedInt');
+  }
   return list;
+}
+
+// Nama leaf port binding Fiberhome. X_FH_LanInterface (daftar path dipisah koma, sama dengan format ZTE/CT-COM);
+// firmware China-Telecom yang hanya punya X_CT-COM_LanInterface tetap didukung.
+function fiberhomeLanLeaf(knownLeaves) {
+  const known = new Set(Array.isArray(knownLeaves) ? knownLeaves : []);
+  return known.has('X_CT-COM_LanInterface') && !known.has('X_FH_LanInterface')
+    ? 'X_CT-COM_LanInterface'
+    : 'X_FH_LanInterface';
 }
 
 // VLAN ZTE berada di WANPPPConnection yang sama dengan autentikasi.
@@ -1257,7 +1324,7 @@ function vendorParameters(profile, ctx, knownLeaves) {
     return zteParameters(ctx);
   }
   if (profile === 'fiberhome') {
-    return fiberhomeParameters(ctx);
+    return fiberhomeParameters(ctx, knownLeaves);
   }
   return ctcomParameters(ctx);
 }
@@ -1282,20 +1349,32 @@ function bindParameters(profile, ctx) {
       'xsd:boolean',
     ]);
   }
-  const name = profile === 'zte' ? 'X_ZTE-COM_LanInterface' : 'X_CT-COM_LanInterface';
+  let name = 'X_CT-COM_LanInterface';
+  if (profile === 'zte') {
+    name = 'X_ZTE-COM_LanInterface';
+  } else if (profile === 'fiberhome') {
+    // Dulu jatuh ke X_CT-COM_LanInterface yang tidak ada di Fiberhome, lalu dibuang diam-diam oleh filter leaf.
+    name = fiberhomeLanLeaf(ctx.knownLeaves);
+  }
   return [[`${ctx.pppPath}${name}`, lan, 'xsd:string']];
 }
 
 // batches dijalankan berurutan. fallback hanya dicoba bila batch vendor ditolak ONU.
 function planWanPpp({ values, manufacturer, productModel, productClass, accessType, pppPath, connectionPath, knownLeaves, deviceLeaves, readOnlyLeaves, wanIndexValues, dataModel }) {
-  const profile = dataModel === 'Device' || String(pppPath || '').startsWith('Device.')
+  let profile = dataModel === 'Device' || String(pppPath || '').startsWith('Device.')
     ? 'tr181'
     : vendorProfile(manufacturer);
+  // Tipe Perangkat yang dipilih user di form menang atas merek yang terbaca dari ACS.
+  if (profile !== 'tr181' && normalizeDeviceType(values.deviceType) === 'fiberhome') {
+    profile = 'fiberhome';
+  }
+  const fiberhome = profile === 'fiberhome';
   const vlanKind = profile === 'zte' ? detectZteVlanLink(knownLeaves) : null;
   const ctcomVariant = vlanKind === 'epon' || vlanKind === 'gpon';
   const ctx = {
     pppPath,
     connectionPath,
+    knownLeaves,
     accessType,
     serviceList: values.serviceList,
     connectionType: values.connectionType,
@@ -1313,13 +1392,16 @@ function planWanPpp({ values, manufacturer, productModel, productClass, accessTy
       key: 'core',
       label: 'parameter standar',
       optional: false,
-      parameterValues: finalizeParameters(coreParameters(pppPath, values), knownLeaves),
+      parameterValues: finalizeParameters(coreParameters(pppPath, values, { fiberhome }), knownLeaves),
     },
     {
       key: 'vendor',
       label: 'VLAN, 802.1p, dan service list',
       optional: true,
-      parameterValues: profile === 'zte'
+      // ZTE dan Fiberhome: struktur sudah dipilih dari pohon ONU (fiberhomeParameters / detectZteVlanLink).
+      // Instance yang baru di-AddObject belum tentu sudah punya leaf PPP di DB ACS, jadi filter leaf
+      // akan membuang VLANID/VLANEnable secara diam-diam.
+      parameterValues: profile === 'zte' || fiberhome
         ? sanitizeParameterValues(vendor)
         : finalizeParameters(vendor, knownLeaves),
       fallback: alternate ? finalizeParameters(vendorParameters(alternate, ctx), knownLeaves) : null,
@@ -1330,7 +1412,9 @@ function planWanPpp({ values, manufacturer, productModel, productClass, accessTy
       optional: true,
       parameterValues: profile === 'zte'
         ? sanitizeParameterValues(bindParameters(bindProfile, ctx))
-        : finalizeParameters(bindParameters(profile, ctx), knownLeaves),
+        : fiberhome
+          ? sanitizeParameterValues(bindParameters(profile, ctx))
+          : finalizeParameters(bindParameters(profile, ctx), knownLeaves),
     },
   ];
   const connectionName = connectionNameRows(pppPath, values, manufacturer || values.manufacturer);
@@ -1400,9 +1484,56 @@ function isRiskyParameter(path, { atomic = false } = {}) {
   return !atomic && RISKY_LEAF.test(String(path).split('.').pop());
 }
 
-// Profil yang sudah terverifikasi membutuhkan mode atomik.
+// Profil yang membutuhkan mode atomik. ZTE terukur di lab. Fiberhome: memecah ConnectionType/ServiceList ke
+// task SESUDAH Enable=true membuat ONT mengaktifkan WAN yang belum lengkap (ConnectionType masih bawaan,
+// ServiceList kosong), lalu tidak membentuknya; penolakan task susulan hanya tercatat sebagai "parsial".
 function prefersAtomicWan(profile) {
-  return String(profile || '').toLowerCase() === 'zte';
+  const name = String(profile || '').toLowerCase();
+  return name === 'zte' || name === 'fiberhome';
+}
+
+// Mode atomik memasukkan Connection Name ke RPC yang sama (ZTE). Fiberhome pernah membalas 9002 pada
+// Name, jadi Name tetap task terpisah supaya penolakannya tidak menggagalkan seluruh WAN.
+function atomicIncludesName(profile) {
+  return String(profile || '').toLowerCase() !== 'fiberhome';
+}
+
+function sameOnuValue(expected, actual) {
+  if (typeof expected === 'boolean') {
+    return ['true', '1'].includes(String(actual).trim().toLowerCase()) === expected;
+  }
+  if (typeof expected === 'number') {
+    return Number(actual) === expected;
+  }
+  return String(actual) === String(expected);
+}
+
+function leafValueAt(doc, path) {
+  let node = doc;
+  for (const part of String(path).split('.')) {
+    node = node == null ? undefined : node[part];
+  }
+  return node && typeof node === 'object' && '_value' in node ? node._value : undefined;
+}
+
+// Bandingkan parameter yang kita kirim dengan yang dilaporkan ONU setelah refreshObject.
+// Password dilewati (ONU tidak membacakannya). missing = leaf tidak dilaporkan; mismatched = nilai berbeda.
+function compareWanReadback(doc, rows) {
+  const missing = [];
+  const mismatched = [];
+  for (const [path, expected] of Array.isArray(rows) ? rows : []) {
+    const name = String(path).split('.').pop();
+    if (/password/i.test(name)) {
+      continue;
+    }
+    const actual = leafValueAt(doc, path);
+    if (actual === undefined) {
+      missing.push(name);
+    } else if (!sameOnuValue(expected, actual)) {
+      mismatched.push({ name, expected, actual });
+    }
+  }
+  return { missing, mismatched };
 }
 
 // Pisahkan satu daftar [path, value, type] menjadi { core, risky }. risky = array berisi satu baris
@@ -1483,6 +1614,7 @@ module.exports = {
   planWanPpp,
   supportsPppoeRouted,
   connectionTypeError,
+  selectedLanInterfaces,
   vendorProfile,
   normalizeDeviceType,
   skipConnectionName,
@@ -1512,6 +1644,9 @@ module.exports = {
   omitBridgeAuth,
   isBridgedConnection,
   CONNECTION_TYPE_TR069,
+  connectionTypeForOnu,
+  atomicIncludesName,
+  compareWanReadback,
   parseWanIp,
   planWanIp,
   generatePortBindingString,

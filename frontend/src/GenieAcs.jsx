@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom'
 import { Eye, EyeOff, Flag, Globe, Network, Pencil, Server, Trash2, TriangleAlert, X } from 'lucide-react'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import {
   createAcsServer,
   deleteAcsDevices,
@@ -163,10 +164,9 @@ function ServerModal({ servers, onClose, onChanged }) {
         port: form.port === '' ? undefined : Number(form.port),
       })
       setForm(EMPTY_SERVER_FORM)
-      await onChanged()
-      Swal.fire({ icon: 'success', title: 'Berhasil!', text: 'Server ACS disimpan', timer: 1500, showConfirmButton: false })
+      await fireSuccess({ title: 'Berhasil!', text: 'Server ACS disimpan' }, () => { void onChanged() })
     } catch (error) {
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(error, 'Gagal menyimpan server ACS.') })
+      fireError({ title: 'Gagal', text: errorMessage(error, 'Gagal menyimpan server ACS.') })
     } finally {
       setSaving(false)
     }
@@ -189,7 +189,7 @@ function ServerModal({ servers, onClose, onChanged }) {
       await deleteAcsServer(server.id)
       await onChanged(server.id)
     } catch (error) {
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(error, 'Gagal menghapus server ACS.') })
+      fireError({ title: 'Gagal', text: errorMessage(error, 'Gagal menghapus server ACS.') })
     } finally {
       setDeletingId(null)
     }
@@ -737,7 +737,7 @@ function wanIpFormFrom(wan) {
 function WanPanel({
   wans, loading, error, onOverlayChange, setWanToDelete, deletingWanPath,
   manufacturer, ssidCount, tr069Ip, onSavePpp, onSaveIp, saving,
-  addWanOpen, addWanIpOpen, onCloseAddWan, onCloseAddWanIp,
+  addWanOpen, addWanIpOpen, onCloseAddWan, onCloseAddWanIp, onAfterWanSuccess,
 }) {
   const [editingWanPath, setEditingWanPath] = useState(null)
   const [editKind, setEditKind] = useState(null)
@@ -908,6 +908,7 @@ function WanPanel({
           onPortChange={updateWanPort}
           onClose={closeWanModal}
           onSave={handleIpSubmit}
+          onAfterSuccess={onAfterWanSuccess}
         />
       )}
       {showPpp && (
@@ -923,6 +924,7 @@ function WanPanel({
           onPortChange={updateWanPort}
           onClose={closeWanModal}
           onSave={handlePppSubmit}
+          onAfterSuccess={onAfterWanSuccess}
         />
       )}
     </div>
@@ -1144,7 +1146,7 @@ function DetailIndicator({ label, children }) {
 // Modal detail satu ONU. Data diambil dari baris yang diklik (sudah bersih dari backend).
 // Info pelanggan / host LAN belum punya sumber data, jadi memakai placeholder.
 function DeviceDetailModal({
-  device, activeTab, onTabChange, onClose, onSummon, summoning, hostsLoading, hostsError, wlansLoading, wlansError, lanLoading, lanError, wansLoading, wansError, onEditWlan, onEditLan, editOpen, renderRx, renderTemp, setWanToDelete, deletingWanPath, deleteConfirmOpen, onSavePpp, onSaveIp, savingWan,
+  device, activeTab, onTabChange, onClose, onSummon, summoning, hostsLoading, hostsError, wlansLoading, wlansError, lanLoading, lanError, wansLoading, wansError, onEditWlan, onEditLan, editOpen, renderRx, renderTemp, setWanToDelete, deletingWanPath, deleteConfirmOpen, onSavePpp, onSaveIp, savingWan, onAfterWanSuccess,
 }) {
   const [wanOverlayOpen, setWanOverlayOpen] = useState(false)
   const [addWanOpen, setAddWanOpen] = useState(false)
@@ -1430,6 +1432,7 @@ function DeviceDetailModal({
                   addWanIpOpen={addWanIpOpen}
                   onCloseAddWan={() => setAddWanOpen(false)}
                   onCloseAddWanIp={() => setAddWanIpOpen(false)}
+                  onAfterWanSuccess={onAfterWanSuccess}
                 />
               ) : (
                 <p className="m-0 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -1897,7 +1900,7 @@ function GenieAcs() {
       return
     }
     if (!wan?.fullPath) {
-      Swal.fire({ icon: 'error', title: 'Gagal', text: 'Path WAN tidak tersedia. Muat ulang tab WAN.' })
+      fireError({ title: 'Gagal', text: 'Path WAN tidak tersedia. Muat ulang tab WAN.' })
       return
     }
     setDeletingWanPath(wan.fullPath)
@@ -1907,18 +1910,13 @@ function GenieAcs() {
         deviceId: id,
         wanPath: wan.fullPath,
       })
-      await fetchDeviceDetail(id)
-      setWansReloadKey((key) => key + 1)
       setWanToDelete(null)
-      Swal.fire({
-        icon: 'success',
-        title: 'Berhasil',
-        text: result.message,
-        timer: 2200,
-        showConfirmButton: false,
+      await fireSuccess({ title: 'Berhasil', text: result.message }, () => {
+        void fetchDeviceDetail(id)
+        setWansReloadKey((key) => key + 1)
       })
     } catch (requestError) {
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(requestError, 'Gagal menghapus koneksi WAN.') })
+      fireError({ title: 'Gagal', text: errorMessage(requestError, 'Gagal menghapus koneksi WAN.') })
     } finally {
       setDeletingWanPath(null)
     }
@@ -1957,7 +1955,7 @@ function GenieAcs() {
         return
       }
       setIsSummoning(false)
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(requestError, 'Gagal menjalankan Summon.') })
+      fireError({ title: 'Gagal', text: errorMessage(requestError, 'Gagal menjalankan Summon.') })
       return
     }
 
@@ -1983,15 +1981,11 @@ function GenieAcs() {
       try {
         const fresh = await fetchDeviceDetail(id, { signal: controller.signal })
         if (!wait.settled && isNewerInform(fresh?.last_inform, baseline) && stopSummonWait()) {
-          setHostsReloadKey((key) => key + 1)
-          setWlansReloadKey((key) => key + 1)
-          setLanReloadKey((key) => key + 1)
-          setWansReloadKey((key) => key + 1)
-          Swal.fire({
-            icon: 'success',
-            title: 'Sukses: ONT merespons!',
-            timer: 2200,
-            showConfirmButton: false,
+          void fireSuccess({ title: 'Sukses: ONT merespons!' }, () => {
+            setHostsReloadKey((key) => key + 1)
+            setWlansReloadKey((key) => key + 1)
+            setLanReloadKey((key) => key + 1)
+            setWansReloadKey((key) => key + 1)
           })
         }
       } catch {
@@ -2005,7 +1999,7 @@ function GenieAcs() {
     wait.intervalId = setInterval(poll, 3000)
     wait.timeoutId = setTimeout(() => {
       if (stopSummonWait()) {
-        Swal.fire({ icon: 'error', title: 'Gagal: ONT tidak merespons panggilan (Timeout)' })
+        fireError({ title: 'Gagal: ONT tidak merespons panggilan (Timeout)' })
       }
     }, 35000)
   }
@@ -2041,21 +2035,13 @@ function GenieAcs() {
         status: wlanForm.status,
       })
       setEditingWlan(null)
-      Swal.fire({
-        icon: 'success',
-        title: 'Berhasil',
-        text: result.message,
-        timer: 2500,
-        showConfirmButton: false,
-      })
-      // Beri waktu ONU melapor balik ke ACS, lalu muat ulang daftar WLAN dan tabel utama.
-      setTimeout(() => {
+      await fireSuccess({ title: 'Berhasil', text: result.message }, () => {
         setWlansReloadKey((key) => key + 1)
         reload()
-      }, 2500)
+      })
     } catch (requestError) {
       // Pop-up tetap terbuka supaya isian tidak hilang dan bisa dicoba lagi.
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(requestError, 'Gagal mengirim perubahan WLAN.') })
+      fireError({ title: 'Gagal', text: errorMessage(requestError, 'Gagal mengirim perubahan WLAN.') })
     } finally {
       setIsUpdating(false)
     }
@@ -2077,11 +2063,10 @@ function GenieAcs() {
         manufacturer,
         ...form,
         deviceType,
-        // Fiberhome: nama dibuat ONT, backend tidak mengirim parameter Name.
-        connectionName: deviceType === 'Fiberhome' ? '' : form.connectionName,
+        // Fiberhome: nama opsional saat membuat (kosong = ONT menamai sendiri); saat edit tidak dikirim.
+        connectionName: deviceType === 'Fiberhome' && editingPath ? '' : form.connectionName,
         ports: orderedPorts(form.selectedPorts),
       })
-      setTimeout(() => setWansReloadKey((key) => key + 1), 2500)
       return { ok: true, partial: Boolean(result.partial), message: result.message }
     } catch (requestError) {
       const wanPath = requestError?.response?.data?.wanPath
@@ -2112,7 +2097,7 @@ function GenieAcs() {
         manufacturer,
         modelName: selectedDevice.tipe || '',
         deviceType,
-        connectionName: deviceType === 'Fiberhome' ? '' : form.connectionName,
+        connectionName: deviceType === 'Fiberhome' && editingPath ? '' : form.connectionName,
         enableConnection: Boolean(form.enableConnection),
         serviceList: form.serviceList,
         connectionType: form.connectionType,
@@ -2126,7 +2111,6 @@ function GenieAcs() {
         dnsServer: staticIp ? form.dnsServer : '',
         ports: orderedPorts(form.ports ?? form.selectedPorts),
       })
-      setTimeout(() => setWansReloadKey((key) => key + 1), 2500)
       return { ok: true, partial: Boolean(result.partial), message: result.message }
     } catch (requestError) {
       const wanPath = requestError?.response?.data?.wanPath
@@ -2177,18 +2161,12 @@ function GenieAcs() {
         ...lanForm,
       })
       setIsEditLanOpen(false)
-      Swal.fire({
-        icon: 'success',
-        title: 'Berhasil',
-        text: result.message,
-        timer: 2500,
-        showConfirmButton: false,
+      await fireSuccess({ title: 'Berhasil', text: result.message }, () => {
+        setLanReloadKey((key) => key + 1)
       })
-      // Beri waktu ONU melapor balik ke ACS, lalu muat ulang konfigurasi LAN agar tampilan terbarui.
-      setTimeout(() => setLanReloadKey((key) => key + 1), 2500)
     } catch (requestError) {
       // Pop-up tetap terbuka supaya isian tidak hilang dan bisa dicoba lagi.
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(requestError, 'Gagal mengirim perubahan LAN.') })
+      fireError({ title: 'Gagal', text: errorMessage(requestError, 'Gagal mengirim perubahan LAN.') })
     } finally {
       setIsUpdatingLan(false)
     }
@@ -2201,11 +2179,12 @@ function GenieAcs() {
     setBusy('sync')
     try {
       const result = await syncAcs(selectedServer)
-      await Swal.fire({ icon: 'success', title: 'Sinkron selesai', text: result.message, timer: 2500, showConfirmButton: false })
-      resetView()
-      reload()
+      await fireSuccess({ title: 'Sinkron selesai', text: result.message }, () => {
+        resetView()
+        reload()
+      })
     } catch (requestError) {
-      Swal.fire({ icon: 'error', title: 'Sinkron gagal', text: errorMessage(requestError, 'Gagal sinkron dengan GenieACS.') })
+      fireError({ title: 'Sinkron gagal', text: errorMessage(requestError, 'Gagal sinkron dengan GenieACS.') })
     } finally {
       setBusy('')
     }
@@ -2243,15 +2222,22 @@ function GenieAcs() {
       } else if (result.berhasil === 0) {
         icon = 'error'
       }
-      await Swal.fire({ icon, title: action.label, text: result.message })
-      if (action.clearsSelection) {
-        setSelected(new Set())
+      const refreshBulk = () => {
+        if (action.clearsSelection) {
+          setSelected(new Set())
+        }
+        if (action.reloads) {
+          reload()
+        }
       }
-      if (action.reloads) {
-        reload()
+      if (icon === 'error') {
+        await fireError({ title: action.label, text: result.message })
+        refreshBulk()
+      } else {
+        await fireSuccess({ icon, title: action.label, text: result.message }, refreshBulk)
       }
     } catch (requestError) {
-      Swal.fire({ icon: 'error', title: 'Gagal', text: errorMessage(requestError, `Gagal menjalankan ${action.label}.`) })
+      fireError({ title: 'Gagal', text: errorMessage(requestError, `Gagal menjalankan ${action.label}.`) })
     } finally {
       setBusy('')
     }
@@ -2503,6 +2489,12 @@ function GenieAcs() {
           onSavePpp={handleSaveWanPpp}
           onSaveIp={handleSaveWanIp}
           savingWan={isSavingWan}
+          onAfterWanSuccess={() => {
+            setWansReloadKey((key) => key + 1)
+            if (selectedDeviceIdRef.current) {
+              void fetchDeviceDetail(selectedDeviceIdRef.current)
+            }
+          }}
           renderRx={renderRx}
           renderTemp={renderTemp}
         />

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from './api/axios.js'
 import Swal from 'sweetalert2'
+import { fireSuccess } from './swals.js'
 import './PppoeProfil.css'
 
 function PppoeProfil() {
@@ -16,7 +17,7 @@ function PppoeProfil() {
   const [selectedGroup, setSelectedGroup] = useState('')
 
   async function fetchProfil() {
-    const response = await api.get('/api/pppoe/profil')
+    const response = await api.get('/pppoe/profil')
     setProfil(Array.isArray(response.data) ? response.data : [])
     setError('')
   }
@@ -26,7 +27,7 @@ function PppoeProfil() {
 
     async function loadProfil() {
       try {
-        const response = await api.get('/api/pppoe/profil')
+        const response = await api.get('/pppoe/profil')
         if (!ignore) {
           setProfil(Array.isArray(response.data) ? response.data : [])
           setError('')
@@ -65,14 +66,8 @@ function PppoeProfil() {
     setFormError('')
   }
 
-  function notifySuccess() {
-    Swal.fire({
-      icon: 'success',
-      title: 'Berhasil!',
-      text: 'Data sukses diperbarui',
-      timer: 1500,
-      showConfirmButton: false,
-    })
+  function notifySuccess(refresh) {
+    return fireSuccess({ title: 'Berhasil!', text: 'Data sukses diperbarui' }, refresh)
   }
 
   async function handleSubmit(event) {
@@ -96,18 +91,17 @@ function PppoeProfil() {
     try {
       if (editMode) {
         await api.put(
-          `/api/pppoe/profil/${encodeURIComponent(selectedGroup)}`,
+          `/pppoe/profil/${encodeURIComponent(selectedGroup)}`,
           { rate_limit: rateLimit },
         )
       } else {
-        await api.post('/api/pppoe/profil', {
+        await api.post('/pppoe/profil', {
           groupname,
           rate_limit: rateLimit,
         })
       }
       resetForm()
-      await fetchProfil()
-      notifySuccess()
+      await notifySuccess(() => { void fetchProfil() })
     } catch (requestError) {
       setFormError(
         requestError.response?.data?.message
@@ -136,13 +130,12 @@ function PppoeProfil() {
 
     try {
       await api.delete(
-        `/api/pppoe/profil/${encodeURIComponent(targetGroup)}`,
+        `/pppoe/profil/${encodeURIComponent(targetGroup)}`,
       )
       if (selectedGroup === targetGroup) {
         resetForm()
       }
-      await fetchProfil()
-      notifySuccess()
+      await notifySuccess(() => { void fetchProfil() })
     } catch (requestError) {
       setFormError(requestError.response?.data?.message || 'Gagal menghapus profil.')
     } finally {

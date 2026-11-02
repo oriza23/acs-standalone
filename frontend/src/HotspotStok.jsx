@@ -3,6 +3,7 @@ import api from './api/axios.js'
 import ServerPagination from './ServerPagination.jsx'
 import useDebouncedValue from './useDebouncedValue.js'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import {
   Banknote,
   Calendar,
@@ -176,7 +177,7 @@ function HotspotStok() {
 
   // Muat ulang halaman tertentu (mis. halaman 1 setelah generate) dengan filter aktif.
   async function fetchVouchers(targetPage = currentPage) {
-    const response = await api.get('/api/hotspot/voucher', {
+    const response = await api.get('/hotspot/voucher', {
       params: { page: targetPage, limit: itemsPerPage, q: searchTerm.trim() },
     })
     applyVoucherResponse(response.data)
@@ -190,7 +191,7 @@ function HotspotStok() {
     async function loadPage() {
       setFetching(true)
       try {
-        const response = await api.get('/api/hotspot/voucher', {
+        const response = await api.get('/hotspot/voucher', {
           params: { page: currentPage, limit: itemsPerPage, q: debouncedSearch },
         })
         if (ignore) {
@@ -224,8 +225,8 @@ function HotspotStok() {
     async function loadData() {
       try {
         const [profilResponse, outletResponse] = await Promise.all([
-          api.get('/api/hotspot/profil'),
-          api.get('/api/outlets').catch(() => ({ data: [] })),
+          api.get('/hotspot/profil'),
+          api.get('/outlets').catch(() => ({ data: [] })),
         ])
         if (ignore) {
           return
@@ -255,7 +256,7 @@ function HotspotStok() {
 
     async function loadRouters() {
       try {
-        const response = await api.get('/api/routers')
+        const response = await api.get('/routers')
         if (!ignore) {
           setDaftarRouter(Array.isArray(response.data) ? response.data : [])
         }
@@ -266,7 +267,7 @@ function HotspotStok() {
       }
       // Server Hotspot yang diinput admin di menu Router.
       try {
-        const response = await api.get('/api/routers/servers', { params: { jenis: 'hotspot' } })
+        const response = await api.get('/routers/servers', { params: { jenis: 'hotspot' } })
         if (!ignore) {
           setDaftarServer(Array.isArray(response.data) ? response.data : [])
         }
@@ -284,14 +285,8 @@ function HotspotStok() {
     }
   }, [])
 
-  function notifySuccess(text) {
-    Swal.fire({
-      icon: 'success',
-      title: 'Berhasil!',
-      text,
-      timer: 1500,
-      showConfirmButton: false,
-    })
+  function notifySuccess(text, refresh) {
+    return fireSuccess({ title: 'Berhasil!', text }, refresh)
   }
 
   useEffect(() => {
@@ -319,7 +314,7 @@ function HotspotStok() {
     async function loadOutlets() {
       setOutletLoading(true)
       try {
-        const response = await api.get('/api/outlets')
+        const response = await api.get('/outlets')
         if (!ignore) {
           setDaftarOutlet(Array.isArray(response.data) ? response.data : [])
         }
@@ -453,16 +448,14 @@ function HotspotStok() {
     }
 
     try {
-      await api.post('/api/hotspot/voucher/delete-massal', {
+      await api.post('/hotspot/voucher/delete-massal', {
         usernames: selectedVouchers,
       })
       setIsMenuOpen(false)
       setSelectedMap({})
-      await fetchVouchers()
-      notifySuccess('Data sukses diperbarui')
+      await notifySuccess('Data sukses diperbarui', () => { void fetchVouchers() })
     } catch (requestError) {
-      Swal.fire({
-        icon: 'error',
+      fireError({
         title: 'Gagal',
         text: requestError.response?.data?.message || 'Gagal menghapus voucher.',
       })
@@ -511,29 +504,30 @@ function HotspotStok() {
     })
 
     try {
-      await api.post('/api/hotspot/voucher/generate', payload)
+      await api.post('/hotspot/voucher/generate', payload)
     } catch (requestError) {
       Swal.close()
-      Swal.fire(
-        'Gagal!',
-        requestError.response?.data?.message || 'Terjadi kesalahan saat generate voucher. Silakan coba lagi.',
-        'error',
-      )
+      fireError({
+        title: 'Gagal!',
+        text: requestError.response?.data?.message || 'Terjadi kesalahan saat generate voucher. Silakan coba lagi.',
+      })
       generatingRef.current = false
       setSaving(false)
       return
     }
 
-    // Generate sukses: kosongkan form, lalu muat ulang tabel agar voucher baru tampil.
     resetVoucherForm()
-    try {
-      await fetchVouchers(1)
-    } catch {
-      setError('Voucher berhasil dibuat, tetapi tabel gagal dimuat ulang. Muat ulang halaman.')
-    }
-
     Swal.close()
-    Swal.fire('Berhasil!', 'Voucher sukses dibuat dan dimasukkan ke database.', 'success')
+    await fireSuccess({
+      title: 'Berhasil!',
+      text: 'Voucher sukses dibuat dan dimasukkan ke database.',
+    }, async () => {
+      try {
+        await fetchVouchers(1)
+      } catch {
+        setError('Voucher berhasil dibuat, tetapi tabel gagal dimuat ulang. Muat ulang halaman.')
+      }
+    })
     generatingRef.current = false
     setSaving(false)
   }
@@ -674,7 +668,7 @@ function HotspotStok() {
   }
 
   async function fetchOutlets() {
-    const response = await api.get('/api/outlets')
+    const response = await api.get('/outlets')
     setDaftarOutlet(Array.isArray(response.data) ? response.data : [])
   }
 
@@ -705,22 +699,23 @@ function HotspotStok() {
 
     try {
       if (isDelete) {
-        await api.post('/api/outlets/delete-massal', {
+        await api.post('/outlets/delete-massal', {
           ids: selectedOutlets,
         })
       } else {
-        await api.post('/api/outlets/set-status-massal', {
+        await api.post('/outlets/set-status-massal', {
           ids: selectedOutlets,
           status,
         })
       }
       setIsOutletMenuOpen(false)
       setSelectedOutlets([])
-      await fetchOutlets()
-      notifySuccess(isDelete ? 'Outlet terpilih berhasil dihapus' : 'Status outlet berhasil diperbarui')
+      await notifySuccess(
+        isDelete ? 'Outlet terpilih berhasil dihapus' : 'Status outlet berhasil diperbarui',
+        () => { void fetchOutlets() },
+      )
     } catch (requestError) {
-      Swal.fire({
-        icon: 'error',
+      fireError({
         title: 'Gagal',
         text: requestError.response?.data?.message || 'Gagal memproses outlet terpilih.',
       })
@@ -749,7 +744,7 @@ function HotspotStok() {
     })
 
     try {
-      await api.post('/api/outlets', {
+      await api.post('/outlets', {
         nama_outlet: formOutlet.nama_outlet.trim(),
         pemilik: formOutlet.pemilik.trim(),
         phone: formOutlet.phone.trim(),
@@ -759,11 +754,9 @@ function HotspotStok() {
       setIsModalTambahOutletOpen(false)
       setFormOutlet(emptyFormOutlet())
       setOutletPage(1)
-      await fetchOutlets()
-      notifySuccess('Outlet berhasil disimpan')
+      await notifySuccess('Outlet berhasil disimpan', () => { void fetchOutlets() })
     } catch (requestError) {
-      Swal.fire({
-        icon: 'error',
+      fireError({
         title: 'Gagal',
         text: requestError.response?.data?.message || 'Gagal menyimpan outlet.',
       })

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Cable, Eye, EyeOff, KeyRound, Network, X } from 'lucide-react'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 
 function errorMessage(error, fallback) {
   return error?.response?.data?.message || fallback
@@ -360,7 +361,7 @@ function WanSavingOverlay() {
 }
 
 export function WanConfigModal({
-  variant, editing = false, manufacturer = '', saving = false, form, ssidCount = 4, onChange, onPatch, onPortChange, onClose, onSave,
+  variant, editing = false, manufacturer = '', saving = false, form, ssidCount = 4, onChange, onPatch, onPortChange, onClose, onSave, onAfterSuccess,
 }) {
   const isPpp = variant === 'ppp'
   const ipRouted = !isPpp && isIpRoutedType(form.connectionType)
@@ -376,7 +377,10 @@ export function WanConfigModal({
   const submitLock = useRef(false)
   const deviceType = resolveDeviceType(form.deviceType, manufacturer)
   const connectionOptions = isPpp ? pppConnectionOptions(manufacturer, deviceType) : WAN_IP_CONNECTION_OPTIONS
-  const autoName = deviceType === 'Fiberhome'
+  // Fiberhome: nama opsional saat membuat WAN (kosong = ONT menamai sendiri, mis. 3_INTERNET_R_VID_2033).
+  // Saat edit nama tidak diubah, jadi dikunci.
+  const nameOptional = deviceType === 'Fiberhome'
+  const autoName = nameOptional && editing
   const busy = isLoading || saving
 
   useEffect(() => {
@@ -447,16 +451,14 @@ export function WanConfigModal({
     }
     if (outcome.ok) {
       onClose()
-      Swal.fire({
+      void fireSuccess({
         icon: outcome.partial ? 'warning' : 'success',
         title: outcome.partial ? 'Sebagian tersimpan' : 'Berhasil',
         text: outcome.message,
-        timer: 3200,
-        showConfirmButton: false,
-      })
+      }, onAfterSuccess)
       return
     }
-    Swal.fire({ icon: 'error', title: 'Gagal', text: outcome.message || 'Gagal mengirim konfigurasi WAN.' })
+    fireError({ title: 'Gagal', text: outcome.message || 'Gagal mengirim konfigurasi WAN.' })
   }
 
   const ipField = (field, label) => (
@@ -544,12 +546,12 @@ export function WanConfigModal({
               label="Connection Name"
               type="text"
               name="connectionName"
-              placeholder="Nama koneksi"
+              placeholder={nameOptional ? 'Kosongkan = otomatis oleh ONT' : 'Nama koneksi'}
               maxLength={128}
-              required={!autoName}
+              required={!nameOptional}
               autoFocus={!autoName}
               disabled={autoName || busy}
-              title={autoName ? 'Fiberhome membuat nama koneksi sendiri' : undefined}
+              title={autoName ? 'Nama koneksi Fiberhome tidak diubah saat edit' : undefined}
               value={autoName ? FIBERHOME_AUTO_NAME : form.connectionName}
               onChange={(event) => onChange('connectionName', event.target.value)}
             />

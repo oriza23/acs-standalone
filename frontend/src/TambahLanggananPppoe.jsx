@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus, Search, Trash2 } from 'lucide-react'
 import L from 'leaflet'
 import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet'
@@ -8,6 +8,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import Swal from 'sweetalert2'
+import { fireError, fireSuccess } from './swals.js'
 import api from './api/axios.js'
 import useDebouncedValue from './useDebouncedValue.js'
 
@@ -30,12 +31,12 @@ const markerPinIcon = L.icon({
 })
 
 const REFERENCE_SOURCES = [
-  { key: 'pelanggan', url: '/api/pelanggan', label: 'pelanggan' },
-  { key: 'profiles', url: '/api/langganan/profil', label: 'profile langganan' },
-  { key: 'routers', url: '/api/routers', label: 'router' },
-  { key: 'outlets', url: '/api/outlets', label: 'mitra reseller' },
-  { key: 'wilayah', url: '/api/wilayah', label: 'wilayah' },
-  { key: 'servers', url: '/api/routers/servers', label: 'server' },
+  { key: 'pelanggan', url: '/pelanggan', label: 'pelanggan' },
+  { key: 'profiles', url: '/langganan/profil', label: 'profile langganan' },
+  { key: 'routers', url: '/routers', label: 'router' },
+  { key: 'outlets', url: '/outlets', label: 'mitra reseller' },
+  { key: 'wilayah', url: '/wilayah', label: 'wilayah' },
+  { key: 'servers', url: '/routers/servers', label: 'server' },
 ]
 
 const KATEGORI_OPTIONS = ['PPP', 'Hotspot', 'Static', 'DHCP']
@@ -329,6 +330,8 @@ function ToggleSwitch({ id, checked, onChange, label }) {
 
 function TambahLanggananPppoe() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const returnTo = location.state?.returnTo
   const [form, setForm] = useState(emptyForm)
   const [items, setItems] = useState([])
   const [reference, setReference] = useState({ pelanggan: [], profiles: [], routers: [], outlets: [], wilayah: [], servers: [] })
@@ -410,7 +413,7 @@ function TambahLanggananPppoe() {
   }
 
   async function fetchWilayah() {
-    const response = await api.get('/api/wilayah')
+    const response = await api.get('/wilayah')
     const rows = Array.isArray(response.data) ? response.data : []
     setReference((current) => ({ ...current, wilayah: rows }))
     return rows
@@ -435,18 +438,14 @@ function TambahLanggananPppoe() {
       return
     }
     try {
-      const { data } = await api.post('/api/wilayah', { nama_wilayah: nama })
-      await fetchWilayah()
+      const { data } = await api.post('/wilayah', { nama_wilayah: nama })
       update('wilayah', data.nama_wilayah || nama)
-      await Swal.fire({
-        icon: 'success',
+      await fireSuccess({
         title: 'Berhasil',
         text: `Wilayah "${data.nama_wilayah || nama}" ditambahkan dan dipilih.`,
-        timer: 1800,
-        showConfirmButton: false,
-      })
+      }, () => { void fetchWilayah() })
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Wilayah gagal disimpan.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Wilayah gagal disimpan.' })
     }
   }
 
@@ -608,17 +607,16 @@ function TambahLanggananPppoe() {
 
     setSaving(true)
     try {
-      await api.post('/api/langganan/data', buildPayload())
-      await Swal.fire({
-        icon: 'success',
-        title: 'Berhasil',
-        text: 'Data langganan berhasil disimpan.',
-        timer: 1500,
-        showConfirmButton: false,
+      await api.post('/langganan/data', buildPayload())
+      await fireSuccess({ title: 'Berhasil', text: 'Data langganan berhasil disimpan.' }, () => {
+        if (returnTo) {
+          navigate(returnTo, { replace: true })
+        } else {
+          navigate('/langganan/data')
+        }
       })
-      navigate('/langganan/data')
     } catch (requestError) {
-      Swal.fire('Gagal', requestError.response?.data?.message || 'Data langganan gagal disimpan.', 'error')
+      fireError({ title: 'Gagal', text: requestError.response?.data?.message || 'Data langganan gagal disimpan.' })
     } finally {
       setSaving(false)
     }
