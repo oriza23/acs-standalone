@@ -1,6 +1,8 @@
 // Merangkum dokumen perangkat GenieACS (NBI) menjadi objek ONU yang bersih dan standar.
 // Seluruh ekstraksi path TR-069 dan konversi satuan dilakukan di sini, bukan di frontend.
 
+const { normalizeWanStatus, resolveWanStatus, detectLegacyWanFirmware } = require('./acs_wan_status');
+
 // ---- Projection NBI ---------------------------------------------------------
 // Hanya path yang dipakai ringkasan di bawah (balasan tetap kecil). Projection NBI tidak
 // mendukung wildcard, jadi instance 1-4 ditulis eksplisit.
@@ -510,18 +512,21 @@ function extractLanConfig(item) {
 // ---- Daftar koneksi WAN -------------------------------------------------------
 // Tidak ikut LIVE_PROJECTION: subtree WANConnectionDevice besar. Diambil per perangkat
 // saat tab WAN dibuka. Sandi PPPoE tidak pernah dikirim apa adanya.
-const SSID_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
 const WANS_PROJECTION = [
+  '_lastInform',
+  `${IGD}.DeviceInfo.Manufacturer`,
+  `${IGD}.DeviceInfo.ProductClass`,
+  `${IGD}.DeviceInfo.ModelName`,
   `${IGD}.WANDevice.1.WANConnectionDevice`,
   `${IGD}.WANDevice.2.WANConnectionDevice`,
+  `${IGD}.LANDevice.1.WLANConfigurationNumberOfEntries`,
+  `${IGD}.LANDevice.1.WLANConfiguration`,
+  'Device.WiFi.SSIDNumberOfEntries',
+  'Device.WiFi.SSID',
   'Device.PPP.Interface',
   'Device.IP.Interface',
   'Device.Ethernet.VLANTermination',
   'Device.NAT.InterfaceSetting',
-  `${IGD}.LANDevice.1.WLANConfigurationNumberOfEntries`,
-  'Device.WiFi.SSIDNumberOfEntries',
-  ...SSID_SLOTS.map((index) => `${IGD}.LANDevice.1.WLANConfiguration.${index}.SSID`),
-  ...SSID_SLOTS.map((index) => `Device.WiFi.SSID.${index}.SSID`),
 ].join(',');
 const MAX_WANS = 32;
 
@@ -532,6 +537,17 @@ const SERVICE_KEYS = [
   'X_HW_SERVICELIST',
   'X_BROADCOM_COM_ServiceName',
   'X_BROADCOM_COM_IfName',
+];
+
+const BIND_KEYS = [
+  'X_CT-COM_LanInterface',
+  'X_CMCC_LanInterface',
+  'X_CU_LanInterface',
+  'X_ZTE-COM_LanInterface',
+  'X_FH_LanInterface',
+  'X_HW_LanInterface',
+  'X_BROADCOM_COM_LanInterface',
+  'PortMapping',
 ];
 
 const VLAN_KEYS = [
@@ -552,15 +568,7 @@ const LINK_VLAN_NODES = [
   'X_CMCC_WANGponLinkConfig',
   'X_CMCC_WANEponLinkConfig',
   'X_FH_WANGponLinkConfig',
-  'X_FH_WANEponLinkConfig',
   'X_CU_WANGponLinkConfig',
-];
-
-const PRIORITY_KEYS = [
-  'X_HW_PRI',
-  'X_ZTE-COM_8021p',
-  'X_CT-COM_802-1pMark',
-  'X_CT-COM_8021p',
 ];
 
 function leafText(node, key) {
@@ -613,20 +621,6 @@ function vlanIdOf(data, parent) {
     || leafText(parent?.WANEthernetLinkConfig, 'VLANID');
 }
 
-function priorityOf(data, parent) {
-  const direct = firstLeaf(data, PRIORITY_KEYS);
-  if (direct) {
-    return direct;
-  }
-  for (const name of LINK_VLAN_NODES) {
-    const mark = leafText(parent?.[name], '802-1pMark');
-    if (mark) {
-      return mark;
-    }
-  }
-  return null;
-}
-
 function vlanStatusOf(data, vlanId) {
   const flag = firstLeaf(data, ['X_CT-COM_VLANEnabled', 'X_HW_VLANEnabled', 'X_CMCC_VLANEnabled']);
   if (flag) {
@@ -644,128 +638,75 @@ function vlanStatusOf(data, vlanId) {
   return '-';
 }
 
+function huaweiBindString(node) {
+  if (!isNode(node)) {
+    return '';
+  }
+  const parts = [];
+  for (let index = 1; index <= 4; index += 1) {
+    if (hostIsActive(node[`Lan${index}Enable`]?._value)) {
+      parts.push(`LAN${index}`);
+    }
+  }
+  for (let index = 1; index <= 8; index += 1) {
+    if (hostIsActive(node[`SSID${index}Enable`]?._value)) {
+      parts.push(`SSID${index}`);
+    }
+  }
+  return parts.join(',');
+}
+
+function bindingStringOf(data) {
+  const direct = firstLeaf(data, BIND_KEYS);
+  if (direct) {
+    return direct;
+  }
+  return huaweiBindString(data?.X_HW_LANBIND);
+}
+
+function highestIndex(node) {
+  return numericKeys(node).reduce((max, key) => Math.max(max, parseInt(key, 10) || 0), 0);
+}
+
+// Jumlah SSID untuk checkbox binding: NumberOfEntries, atau hitungan instance WLAN/SSID.
+// 0 bila perangkat tidak melaporkan WLAN (pemanggil UI memakai 4 sebagai bawaan).
+function ssidCountOf(item) {
+  const lan = item?.InternetGatewayDevice?.LANDevice?.[1];
+  const reported = toNumber(lan?.WLANConfigurationNumberOfEntries?._value) || 0;
+  const fromObjects = highestIndex(lan?.WLANConfiguration);
+  const wifiReported = toNumber(item?.Device?.WiFi?.SSIDNumberOfEntries?._value) || 0;
+  const fromWifi = highestIndex(item?.Device?.WiFi?.SSID);
+  const count = Math.max(reported, fromObjects, wifiReported, fromWifi);
+  if (count <= 0) {
+    return 0;
+  }
+  return Math.min(8, count);
+}
+
 function hasConnectionData(data) {
   return isNode(data) && Boolean(
-    data.Name || data.ConnectionStatus || data.ExternalIPAddress || data.Username
+    data.Name || data.ConnectionStatus || data.Status || data.ExternalIPAddress || data.Username
     || data.Enable || data.ConnectionType || data.TransportType || data.DNSServers,
   );
-}
-
-const BIND_STRING_KEYS = [
-  'X_ZTE-COM_LanInterface',
-  'X_CT-COM_LanInterface',
-  'X_CMCC_LanInterface',
-  'X_CU_LanInterface',
-  'X_FH_LanInterface',
-];
-const BIND_LABELS = ['LAN1', 'LAN2', 'LAN3', 'LAN4', 'SSID1', 'SSID2', 'SSID3', 'SSID4', 'SSID5', 'SSID6', 'SSID7', 'SSID8'];
-const HUAWEI_BIND_LEAVES = [
-  ['Lan1Enable', 'LAN1'],
-  ['Lan2Enable', 'LAN2'],
-  ['Lan3Enable', 'LAN3'],
-  ['Lan4Enable', 'LAN4'],
-  ['SSID1Enable', 'SSID1'],
-  ['SSID2Enable', 'SSID2'],
-  ['SSID3Enable', 'SSID3'],
-  ['SSID4Enable', 'SSID4'],
-  ['SSID5Enable', 'SSID5'],
-  ['SSID6Enable', 'SSID6'],
-  ['SSID7Enable', 'SSID7'],
-  ['SSID8Enable', 'SSID8'],
-];
-
-function labelsFromBindingText(text) {
-  const seen = new Set();
-  const value = String(text || '');
-  for (const match of value.matchAll(/LANEthernetInterfaceConfig\.(\d+)/gi)) {
-    const index = Number(match[1]);
-    if (index >= 1 && index <= 4) {
-      seen.add(`LAN${index}`);
-    }
-  }
-  for (const match of value.matchAll(/WLANConfiguration\.(\d+)/gi)) {
-    const index = Number(match[1]);
-    if (index >= 1 && index <= 8) {
-      seen.add(`SSID${index}`);
-    }
-  }
-  for (const match of value.matchAll(/WiFi\.SSID\.(\d+)/gi)) {
-    const index = Number(match[1]);
-    if (index >= 1 && index <= 8) {
-      seen.add(`SSID${index}`);
-    }
-  }
-  for (const match of value.matchAll(/\b(LAN[1-4]|SSID[1-8])\b/gi)) {
-    seen.add(match[1].toUpperCase());
-  }
-  return BIND_LABELS.filter((label) => seen.has(label));
-}
-
-function flagEnabled(value) {
-  return value === true || value === 1 || value === '1' || String(value || '').toLowerCase() === 'true';
-}
-
-function boundPortsOf(data) {
-  if (!isNode(data)) {
-    return [];
-  }
-  const seen = new Set(labelsFromBindingText(firstLeaf(data, BIND_STRING_KEYS) || ''));
-  const bind = data.X_HW_LANBIND;
-  if (isNode(bind)) {
-    for (const [leaf, label] of HUAWEI_BIND_LEAVES) {
-      if (flagEnabled(bind[leaf]?._value)) {
-        seen.add(label);
-      }
-    }
-  }
-  return BIND_LABELS.filter((label) => seen.has(label));
-}
-
-function presentSsidCount(node) {
-  let highest = 0;
-  for (const index of SSID_SLOTS) {
-    const child = node?.[index];
-    if (isNode(child) && (child.SSID || child.Enable)) {
-      highest = index;
-    }
-  }
-  return highest;
-}
-
-function ssidCountOf(item) {
-  const reported = toNumber(item?.InternetGatewayDevice?.LANDevice?.[1]?.WLANConfigurationNumberOfEntries?._value)
-    ?? toNumber(item?.Device?.WiFi?.SSIDNumberOfEntries?._value);
-  if (reported && reported >= 1) {
-    return Math.min(8, Math.max(1, Math.round(reported)));
-  }
-  const fromWlan = presentSsidCount(item?.InternetGatewayDevice?.LANDevice?.[1]?.WLANConfiguration);
-  if (fromWlan > 0) {
-    return Math.min(8, fromWlan);
-  }
-  const fromWifi = presentSsidCount(item?.Device?.WiFi?.SSID);
-  if (fromWifi > 0) {
-    return Math.min(8, fromWifi);
-  }
-  return 4;
 }
 
 function connectionRecord(id, kind, data, parent, fullPath) {
   const ppp = kind === 'PPP';
   const vlanId = vlanIdOf(data, parent);
+  const { status, source } = resolveWanStatus(data);
   return {
     id,
     fullPath,
     type: kind,
     name: leafText(data, 'Name') || '-',
-    status: leafText(data, 'ConnectionStatus') || '-',
+    status: status || '-',
+    statusSource: source,
     ip: leafText(data, 'ExternalIPAddress') || '-',
     remoteIp: leafText(data, 'RemoteIPAddress') || leafText(data, 'DefaultGateway') || '-',
     username: ppp ? (leafText(data, 'Username') || '-') : '-',
     password: ppp ? maskedSecret(data?.Password?._value) : '-',
     vlanStatus: vlanStatusOf(data, vlanId),
     vlanId: vlanId || '-',
-    priority: priorityOf(data, parent) || '-',
-    mtu: leafText(data, 'MaxMRUSize') || '-',
     service: firstLeaf(data, SERVICE_KEYS) || leafText(data, 'Name') || '-',
     dns: leafText(data, 'DNSServers') || '-',
     connTrigger: leafText(data, 'ConnectionTrigger') || 'AlwaysOn',
@@ -774,7 +715,7 @@ function connectionRecord(id, kind, data, parent, fullPath) {
     mac: leafText(data, 'MACAddress') || '-',
     connType: leafText(data, 'ConnectionType') || (ppp ? 'PPPoE' : 'IP_Routed'),
     uptime: leafText(data, 'Uptime') || '0',
-    boundPorts: boundPortsOf(data),
+    portBind: bindingStringOf(data),
   };
 }
 
@@ -879,7 +820,7 @@ function wansTr181(device) {
       fullPath: `Device.PPP.Interface.${key}.`,
       type: 'PPP',
       name: leafText(data, 'Name') || '-',
-      status: leafText(data, 'ConnectionStatus') || leafText(data, 'Status') || '-',
+      status: normalizeWanStatus(leafText(data, 'ConnectionStatus') || leafText(data, 'Status')) || '-',
       ip,
       remoteIp: '-',
       username: leafText(data, 'Username') || '-',
@@ -894,7 +835,6 @@ function wansTr181(device) {
       mac,
       connType: 'PPPoE',
       uptime: leafText(data, 'LastChange') || '0',
-      boundPorts: boundPortsOf(data),
     });
   }
 
@@ -913,7 +853,7 @@ function wansTr181(device) {
       fullPath: `Device.IP.Interface.${key}.`,
       type: 'IP',
       name: leafText(iface, 'Name') || '-',
-      status: leafText(iface, 'Status') || '-',
+      status: normalizeWanStatus(leafText(iface, 'Status')) || '-',
       ip: ipv4Of(iface) || '-',
       remoteIp: '-',
       username: '-',
@@ -928,10 +868,55 @@ function wansTr181(device) {
       mac: leafText(iface, 'MACAddress') || '-',
       connType: leafText(iface, 'Type') || 'IP_Routed',
       uptime: '0',
-      boundPorts: boundPortsOf(iface),
     });
   }
   return wans;
+}
+
+// Nama leaf di seluruh subtree WANDevice (batas kedalaman), untuk mendeteksi firmware X_CT-COM_ / X_CMCC_.
+function collectWanLeafNames(igd, limit = 400) {
+  const names = [];
+  const walk = (node, depth) => {
+    if (!isNode(node) || depth > 6 || names.length >= limit) {
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key.startsWith('_')) {
+        continue;
+      }
+      names.push(key);
+      walk(node[key], depth + 1);
+    }
+  };
+  walk(igd?.WANDevice, 0);
+  return names;
+}
+
+// Identitas ONU untuk keputusan force refresh: { kind, manufacturer, modelName, productClass, online }.
+// kind = 'china-carrier' | 'huawei-legacy' | ''.
+function wanFirmwareProfile(item) {
+  const info = item?.InternetGatewayDevice?.DeviceInfo;
+  const manufacturer = leafText(info, 'Manufacturer') || '';
+  const productClass = leafText(info, 'ProductClass') || '';
+  const modelName = leafText(info, 'ModelName') || '';
+  const kind = detectLegacyWanFirmware({
+    manufacturer,
+    productClass,
+    modelName,
+    leafNames: collectWanLeafNames(item?.InternetGatewayDevice),
+  });
+  return { kind, manufacturer, productClass, modelName };
+}
+
+// Node WAN (tanpa titik di akhir) yang statusnya masih kosong: target refreshObject.
+function wanStatusRefreshTargets(wans, limit = 8) {
+  const targets = [];
+  for (const wan of Array.isArray(wans) ? wans : []) {
+    if (wan?.fullPath && (!wan.status || wan.status === '-')) {
+      targets.push(String(wan.fullPath).replace(/\.$/, ''));
+    }
+  }
+  return [...new Set(targets)].slice(0, limit);
 }
 
 function extractWans(item) {
@@ -953,6 +938,8 @@ module.exports = {
   extractHosts,
   extractWlans,
   extractWans,
+  wanFirmwareProfile,
+  wanStatusRefreshTargets,
   ssidCountOf,
   RX_PATHS,
   TEMP_PATHS,

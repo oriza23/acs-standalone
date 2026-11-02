@@ -144,17 +144,19 @@ function planLanUpdate({ lanNode, values }) {
     }
   };
   const interfaceNode = lanNode?.IPInterface?.[1];
-  const ipChanged = interfaceNode?.IPInterfaceIPAddress?._value !== values.ip;
-  if (ipChanged) {
-    parameterValues.push([`${LAN_BASE}.IPInterface.1.IPInterfaceIPAddress`, values.ip, 'xsd:string']);
-    changed.push('ip');
-  }
-  // Gateway DHCP (opsi router). Dikirim bersama IP LAN agar klien tidak tetap memakai gateway lama.
-  // Bila IP LAN sudah sama tetapi IPRouters yang tersimpan berbeda, parameter ini tetap dikirim.
+  const currentIp = interfaceNode?.IPInterfaceIPAddress?._value;
   const currentRouters = lanNode?.IPRouters?._value;
-  const routersDiffer = currentRouters !== undefined && currentRouters !== null && String(currentRouters).trim() !== values.ip;
+  const ipChanged = currentIp !== values.ip;
+  const routersKnown = currentRouters !== undefined && currentRouters !== null;
+  const routersDiffer = routersKnown && String(currentRouters).trim() !== values.ip;
+  // IP LAN dan gateway DHCP harus satu SetParameterValues. ONT ZTE memperbarui IP
+  // antarmuka tanpa mengubah opsi router DHCP bila IPRouters tidak ada di payload yang sama.
   if (ipChanged || routersDiffer) {
+    parameterValues.push([`${LAN_BASE}.IPInterface.1.IPInterfaceIPAddress`, values.ip, 'xsd:string']);
     parameterValues.push([`${LAN_BASE}.IPRouters`, values.ip, 'xsd:string']);
+    if (ipChanged) {
+      changed.push('ip');
+    }
     changed.push('ipRouters');
   }
   push('subnet', `${LAN_BASE}.IPInterface.1.IPInterfaceSubnetMask`, values.subnet, 'xsd:string', interfaceNode?.IPInterfaceSubnetMask?._value);

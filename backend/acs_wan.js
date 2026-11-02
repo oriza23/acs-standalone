@@ -55,7 +55,10 @@ const HUAWEI_BIND = {
   ssid8: 'SSID8Enable',
 };
 
-function supportsPppoeRouted(manufacturer) {
+function supportsPppoeRouted(manufacturer, deviceType = '') {
+  if (normalizeDeviceType(deviceType) === 'fiberhome') {
+    return true;
+  }
   const name = String(manufacturer || '').toLowerCase();
   const compact = name.replace(/[^a-z0-9]+/g, '');
   return name.includes('fiberhome')
@@ -63,8 +66,8 @@ function supportsPppoeRouted(manufacturer) {
     || PPP_ROUTED_BRANDS.some((brand) => name.includes(brand) || compact.includes(brand.replace(/-/g, '')));
 }
 
-function connectionTypeError(manufacturer, connectionType) {
-  if (connectionType === 'pppoe_routed' && !supportsPppoeRouted(manufacturer)) {
+function connectionTypeError(manufacturer, connectionType, deviceType = '') {
+  if (connectionType === 'pppoe_routed' && !supportsPppoeRouted(manufacturer, deviceType)) {
     return 'Connection Type pppoe_routed tidak didukung merek modem ini';
   }
   return null;
@@ -89,6 +92,46 @@ function vendorProfile(manufacturer) {
     return 'fiberhome';
   }
   return 'ctcom';
+}
+
+// Tipe Perangkat dari form: menentukan apakah Connection Name dikirim ke ONU.
+const DEVICE_TYPES = ['zte', 'huawei', 'chinamobile', 'fiberhome'];
+
+function normalizeDeviceType(value) {
+  const compact = String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (compact === 'cmcc') {
+    return 'chinamobile';
+  }
+  return DEVICE_TYPES.includes(compact) ? compact : '';
+}
+
+// Fiberhome membuat nama koneksi sendiri; menulis ...Name membuat ONT membalas 9002 Internal Error.
+// Dilewati bila user memilih Fiberhome ATAU ONU yang sebenarnya terbaca bermerek Fiberhome.
+function skipConnectionName({ deviceType, manufacturer } = {}) {
+  return normalizeDeviceType(deviceType) === 'fiberhome' || vendorProfile(manufacturer) === 'fiberhome';
+}
+
+// Connection Name tidak ikut batch utama. Dikirim terpisah (Safe-Write) setelah Username/Password/VLAN
+// berhasil, supaya Name yang read-only/ditolak tidak menggagalkan parameter utama.
+function connectionNameRows(basePath, values, manufacturer) {
+  if (skipConnectionName({ deviceType: values?.deviceType, manufacturer: manufacturer || values?.manufacturer })) {
+    return [];
+  }
+  const name = String(values?.connectionName || '').trim();
+  return name ? [[`${basePath}Name`, name, 'xsd:string']] : [];
+}
+
+// deviceType opsional (klien lama): kosong berarti ditentukan dari merek ONU yang terbaca di ACS.
+function readDeviceType(body) {
+  const raw = body?.deviceType;
+  if (raw === undefined || raw === null || raw === '') {
+    return { deviceType: '' };
+  }
+  const deviceType = normalizeDeviceType(raw);
+  if (!deviceType) {
+    return { error: 'Tipe Perangkat tidak valid (ZTE, Huawei, ChinaMobile, atau Fiberhome)' };
+  }
+  return { deviceType };
 }
 
 function readText(value, max) {
@@ -165,8 +208,14 @@ function parseWanPpp(body) {
     }
   }
 
-  const connectionName = readText(body?.connectionName, 128);
-  if (!connectionName) {
+  const deviceTypeError = readDeviceType(body);
+  if (deviceTypeError.error) {
+    return { error: deviceTypeError.error };
+  }
+  const { deviceType } = deviceTypeError;
+  // Fiberhome: nama dibuat ONT sendiri, input 'Otomatis' di form tidak dikirim.
+  const connectionName = deviceType === 'fiberhome' ? '' : readText(body?.connectionName, 128);
+  if (deviceType !== 'fiberhome' && !connectionName) {
     return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
   }
   if (typeof body?.enableConnection !== 'boolean' || typeof body?.natStatus !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
@@ -248,6 +297,7 @@ function parseWanPpp(body) {
       mtu,
       ports: ports.value,
       manufacturer,
+      deviceType,
     },
   };
 }
@@ -408,8 +458,13 @@ function parseWanIp(body) {
     }
   }
 
-  const connectionName = readText(body?.connectionName, 128);
-  if (!connectionName) {
+  const deviceTypeError = readDeviceType(body);
+  if (deviceTypeError.error) {
+    return { error: deviceTypeError.error };
+  }
+  const { deviceType } = deviceTypeError;
+  const connectionName = deviceType === 'fiberhome' ? '' : readText(body?.connectionName, 128);
+  if (deviceType !== 'fiberhome' && !connectionName) {
     return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
   }
   if (typeof body?.enableConnection !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
@@ -500,6 +555,7 @@ function parseWanIp(body) {
       ports: ports.value,
       manufacturer,
       modelName,
+      deviceType,
     },
   };
 }
@@ -508,7 +564,6 @@ function ipCoreParameters(ipPath, values) {
   const bridged = values.connectionType === 'IP_Bridged';
   const list = [];
   push(list, `${ipPath}Enable`, values.enableConnection === true, 'xsd:boolean');
-  push(list, `${ipPath}Name`, String(values.connectionName), 'xsd:string');
   push(list, `${ipPath}ConnectionType`, values.connectionType, 'xsd:string');
   push(list, `${ipPath}NATEnabled`, bridged ? false : true, 'xsd:boolean');
   if (!bridged && values.addressingType) {
@@ -595,7 +650,11 @@ function planWanIp({ values, manufacturer, modelName, productModel, productClass
         : finalizeParameters(ipBindParameters(profile, ctx), knownLeaves),
     },
   ];
-  const fields = ['connectionName', 'enable', 'connectionType', 'nat', 'serviceList', 'vlan', 'priority'];
+  const connectionName = connectionNameRows(ipPath, values, manufacturer || values.manufacturer);
+  const fields = ['enable', 'connectionType', 'nat', 'serviceList', 'vlan', 'priority'];
+  if (connectionName.length > 0) {
+    fields.unshift('connectionName');
+  }
   if (values.connectionType === 'IP_Routed') {
     fields.push('addressing');
   }
@@ -606,7 +665,7 @@ function planWanIp({ values, manufacturer, modelName, productModel, productClass
     ? zteVlanPayloads(batches, ctx, ipBindParameters, vlanKind)
     : [];
   return applyCmccDetection(applyWanIndexGuard({
-    profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads, singleAttempt: false, vlanBlocked: false, blockedMessage: '',
+    profile, ctcomVariant, vlanKind, fields, batches, connectionName, fallbackPayloads, singleAttempt: false, vlanBlocked: false, blockedMessage: '',
   }, ctcomWanIndexGuard({
     knownLeaves, readOnlyLeaves, wanIndexValues, vlanRequested: values.vlanStatus === true,
   })), ctx, {
@@ -846,7 +905,6 @@ function coreParameters(pppPath, values) {
   const list = [];
   // Satu nilai Enable boolean. ConnectionTrigger dan MTU tidak dikirim.
   push(list, `${pppPath}Enable`, values.enableConnection === true, 'xsd:boolean');
-  push(list, `${pppPath}Name`, String(values.connectionName), 'xsd:string');
   push(list, `${pppPath}ConnectionType`, CONNECTION_TYPE_TR069[values.connectionType], 'xsd:string');
   if (!isBridgedConnection(values.connectionType)) {
     if (values.username) {
@@ -856,7 +914,10 @@ function coreParameters(pppPath, values) {
       push(list, `${pppPath}Password`, values.password, 'xsd:string');
     }
   }
-  push(list, `${pppPath}NATEnabled`, values.natStatus === true, 'xsd:boolean');
+  // ONU menolak NAT pada koneksi bridge dengan CWMP 9003 (Invalid arguments). Koneksi bridged bawaan
+  // ONU (mis. ZTE "hotspot") selalu NATEnabled=false, jadi nilainya dipaksa false walau form mencentang NAT.
+  const nat = isBridgedConnection(values.connectionType) ? false : values.natStatus === true;
+  push(list, `${pppPath}NATEnabled`, nat, 'xsd:boolean');
   return list;
 }
 
@@ -1272,9 +1333,13 @@ function planWanPpp({ values, manufacturer, productModel, productClass, accessTy
         : finalizeParameters(bindParameters(profile, ctx), knownLeaves),
     },
   ];
+  const connectionName = connectionNameRows(pppPath, values, manufacturer || values.manufacturer);
   const fields = [
-    'connectionName', 'enable', 'connectionType', 'nat', 'serviceList', 'vlan', 'priority',
+    'enable', 'connectionType', 'nat', 'serviceList', 'vlan', 'priority',
   ];
+  if (connectionName.length > 0) {
+    fields.unshift('connectionName');
+  }
   if (!isBridgedConnection(values.connectionType) && values.username) {
     fields.push('username');
   }
@@ -1288,7 +1353,7 @@ function planWanPpp({ values, manufacturer, productModel, productClass, accessTy
     ? zteVlanPayloads(batches, ctx, bindParameters, vlanKind)
     : [];
   return applyCmccDetection(applyWanIndexGuard({
-    profile, ctcomVariant, vlanKind, fields, batches, fallbackPayloads, singleAttempt: false, vlanBlocked: false, blockedMessage: '',
+    profile, ctcomVariant, vlanKind, fields, batches, connectionName, fallbackPayloads, singleAttempt: false, vlanBlocked: false, blockedMessage: '',
   }, ctcomWanIndexGuard({
     knownLeaves, readOnlyLeaves, wanIndexValues, vlanRequested: values.vlanStatus === true,
   })), ctx, {
@@ -1321,6 +1386,47 @@ function ctcomFallbackPayload(plan) {
 
 function zteVlanFallbackPayloads(plan) {
   return (plan?.fallbackPayloads || []).filter((item) => Array.isArray(item?.parameterValues) && item.parameterValues.length > 0);
+}
+
+// Parameter yang sering ditolak/read-only di firmware tertentu (CWMP 9002/9003/9008). Di arsitektur
+// Queue-and-Fire ketiganya dikirim sebagai task SetParameterValues TERPISAH (satu task per parameter),
+// sehingga penolakan ONU hanya menggagalkan task itu dan tidak menahan Username/Password/VLAN.
+const RISKY_LEAF = /^(?:connectiontype|name|[a-z0-9_-]*servicelist)$/i;
+// Mode atomik: tidak ada parameter yang diisolasi; seluruh konfigurasi (ConnectionType, ServiceList, VLAN,
+// LanInterface, Name) dikirim dalam satu RPC dan Enable ditaruh paling akhir. ZTE F609 memvalidasi seluruh
+// konfigurasi instance baru saat Enable=true: Enable tanpa Name terisi / ServiceList / ConnectionType yang
+// ikut dalam RPC yang sama menghasilkan CWMP 9003 (terukur di lab).
+function isRiskyParameter(path, { atomic = false } = {}) {
+  return !atomic && RISKY_LEAF.test(String(path).split('.').pop());
+}
+
+// Profil yang sudah terverifikasi membutuhkan mode atomik.
+function prefersAtomicWan(profile) {
+  return String(profile || '').toLowerCase() === 'zte';
+}
+
+// Pisahkan satu daftar [path, value, type] menjadi { core, risky }. risky = array berisi satu baris
+// per task (ConnectionType, ServiceList, Name).
+function splitWanParameters(parameterValues, options = {}) {
+  const rows = Array.isArray(parameterValues) ? parameterValues : [];
+  const core = [];
+  const riskyRows = [];
+  for (const row of rows) {
+    (isRiskyParameter(row[0], options) ? riskyRows : core).push(row);
+  }
+  if (options.atomic) {
+    const isEnable = (row) => String(row[0]).split('.').pop() === 'Enable';
+    core.sort((left, right) => Number(isEnable(left)) - Number(isEnable(right)));
+  }
+  const rank = (row) => {
+    const leaf = String(row[0]).split('.').pop().toLowerCase();
+    if (leaf === 'connectiontype') {
+      return 0;
+    }
+    return leaf === 'name' ? 2 : 1;
+  };
+  riskyRows.sort((left, right) => rank(left) - rank(right));
+  return { core, risky: riskyRows.map((row) => [row]) };
 }
 
 // Seluruh parameter WAN dikirim dalam satu setParameterValues.
@@ -1378,6 +1484,8 @@ module.exports = {
   supportsPppoeRouted,
   connectionTypeError,
   vendorProfile,
+  normalizeDeviceType,
+  skipConnectionName,
   connectionPathOf,
   formatAcsFault,
   selectWanLocation,
@@ -1385,6 +1493,9 @@ module.exports = {
   normalizeAcsObjectName,
   sanitizeParameterValues,
   batchWanParameters,
+  splitWanParameters,
+  isRiskyParameter,
+  prefersAtomicWan,
   ctcomFallbackPayload,
   zteVlanFallbackPayloads,
   detectZteVlanLink,

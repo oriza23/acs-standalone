@@ -179,7 +179,7 @@ function passwordPathFor(wlanId, wlanNode) {
 // (wlanNode = node WLANConfiguration.{id} dari GenieACS). changed berisi nama field, bukan nilainya.
 // security kosong = jangan ubah mode. Mengembalikan { error } bila mode baru butuh sandi yang tidak ada.
 function planWlanUpdate({
-  wlanId, wlanNode, ssid, password, status, security = '',
+  wlanId, wlanNode, ssid, password, status, security = '', manufacturer = '',
 }) {
   const base = `${IGD}.LANDevice.1.WLANConfiguration.${wlanId}`;
   const parameterValues = [];
@@ -225,7 +225,26 @@ function planWlanUpdate({
     }
   }
 
-  return { parameterValues, changed };
+  const result = { parameterValues, changed };
+  // Fiberhome HG6145D2 (dan sejenis): mode 11i / WPAand11i menyimpan sandi di dua leaf.
+  // Dipisah dari payload utama supaya ONU yang tidak punya leaf ini tidak menolak seluruh update.
+  if (password && !open && isFiberhomeVendor(manufacturer)) {
+    const beacon = security
+      ? tr098Security(security).beaconType
+      : textOf(wlanNode?.BeaconType?._value);
+    if (beacon === '11i' || beacon === 'WPAand11i') {
+      result.vendorPasswordValues = [
+        [`${base}.Password(WPA)`, password, 'xsd:string'],
+        [`${base}.Password(WPA2)`, password, 'xsd:string'],
+      ];
+    }
+  }
+  return result;
+}
+
+function isFiberhomeVendor(manufacturer) {
+  const text = String(manufacturer || '').toLowerCase();
+  return text.includes('fiberhome') || text.includes('fiber home');
 }
 
 module.exports = {
