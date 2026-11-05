@@ -553,7 +553,7 @@ test('extractWans: TR-098 PPP dan IP, VLAN vendor, sandi disamarkan', () => {
   assert.equal(wans[1].vlanStatus, 'Enabled');
   assert.equal(wans[1].nat, 'Disabled');
   assert.equal(wans[1].transport, 'IP_Routed');
-  assert.equal(wans[1].service, 'ip_tr069');
+  assert.equal(wans[1].service, '-');
   assert.equal(wans[1].connTrigger, 'AlwaysOn');
 });
 
@@ -659,6 +659,35 @@ test('extractWans: port binding ZTE dan Huawei dibaca, jumlah SSID dari NumberOf
     },
   }), 4);
   assert.equal(ssidCountOf({}), 0);
+});
+
+test('extractWans Fiberhome: Service List dari X_FH_ServiceList, nama koneksi tidak masuk service', () => {
+  const item = {
+    InternetGatewayDevice: {
+      WANDevice: {
+        1: {
+          WANConnectionDevice: {
+            2: {
+              WANPPPConnection: {
+                1: host({
+                  Name: '2_INTERNET_R_VID_2033',
+                  ConnectionType: 'IP_Routed',
+                  Username: 'budi@net',
+                  'X_FH_ServiceList': 'INTERNET',
+                  VLANID: '2033',
+                  Enable: true,
+                  ConnectionStatus: 'Connected',
+                }),
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  const [wan] = extractWans(item);
+  assert.equal(wan.name, '2_INTERNET_R_VID_2033');
+  assert.equal(wan.service, 'INTERNET');
 });
 
 test('extractWans: data kosong dan projection tidak ikut daftar ONU', () => {

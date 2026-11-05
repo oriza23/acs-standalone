@@ -124,12 +124,35 @@ function readConnectionName(body, deviceType) {
   return readText(raw, 128);
 }
 
+// Nama otomatis Fiberhome, mis. "2_INTERNET_R_VID_2033". Bukan nilai Service List.
+function looksLikeOnuConnectionName(value) {
+  const text = String(value || '').trim();
+  return /^\d+_/.test(text) || /_VID_/i.test(text);
+}
+
+// Service List form. Fiberhome: bila yang datang adalah nama koneksi (salah petakan di UI lama),
+// paksa INTERNET. Nilai sah (INTERNET, TR069, …) tetap dipakai.
+function readServiceList(body, deviceType) {
+  const raw = typeof body?.serviceList === 'string' ? body.serviceList.trim() : '';
+  if (SERVICE_LIST.includes(raw)) {
+    return { serviceList: raw };
+  }
+  const upper = raw.toUpperCase();
+  if (SERVICE_LIST.includes(upper)) {
+    return { serviceList: upper };
+  }
+  if (deviceType === 'fiberhome' && (!raw || looksLikeOnuConnectionName(raw))) {
+    return { serviceList: 'INTERNET' };
+  }
+  return { error: 'Service List tidak valid' };
+}
+
 // Connection Name tidak ikut batch utama. Dikirim terpisah (Safe-Write) setelah Username/Password/VLAN
 // berhasil, supaya Name yang read-only/ditolak tidak menggagalkan parameter utama.
 function connectionNameRows(basePath, values, manufacturer) {
   const name = String(values?.connectionName || '').trim();
   const isAuto = skipConnectionName({ deviceType: values?.deviceType, manufacturer: manufacturer || values?.manufacturer });
-  if (isAuto && name.toLowerCase() === FIBERHOME_AUTO_NAME) {
+  if (isAuto && (values?.wanPath || name.toLowerCase() === FIBERHOME_AUTO_NAME)) {
     return [];
   }
   return name ? [[`${basePath}Name`, name, 'xsd:string']] : [];
@@ -227,18 +250,23 @@ function parseWanPpp(body) {
     return { error: deviceTypeError.error };
   }
   const { deviceType } = deviceTypeError;
-  const connectionName = readConnectionName(body, deviceType);
+  let connectionName = readConnectionName(body, deviceType);
   if (connectionName === null || (deviceType !== 'fiberhome' && !connectionName)) {
     return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
+  }
+  // Edit Fiberhome: nama instance (2_INTERNET_R_VID_…) dibuat ONT. Jangan ditulis ulang.
+  if (deviceType === 'fiberhome' && wanPath) {
+    connectionName = '';
   }
   if (typeof body?.enableConnection !== 'boolean' || typeof body?.natStatus !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
     return { error: 'Status koneksi, NAT, dan VLAN harus berupa true atau false' };
   }
 
-  const serviceList = typeof body?.serviceList === 'string' ? body.serviceList.trim() : '';
-  if (!SERVICE_LIST.includes(serviceList)) {
-    return { error: 'Service List tidak valid' };
+  const serviceRead = readServiceList(body, deviceType);
+  if (serviceRead.error) {
+    return { error: serviceRead.error };
   }
+  const { serviceList } = serviceRead;
   const connectionType = normalizeConnectionType(body?.connectionType);
   if (!PPP_UI_TYPES.includes(connectionType)) {
     return { error: 'Connection Type tidak valid' };
@@ -476,18 +504,22 @@ function parseWanIp(body) {
     return { error: deviceTypeError.error };
   }
   const { deviceType } = deviceTypeError;
-  const connectionName = readConnectionName(body, deviceType);
+  let connectionName = readConnectionName(body, deviceType);
   if (connectionName === null || (deviceType !== 'fiberhome' && !connectionName)) {
     return { error: 'Connection Name wajib diisi (maksimal 128 karakter)' };
+  }
+  if (deviceType === 'fiberhome' && wanPath) {
+    connectionName = '';
   }
   if (typeof body?.enableConnection !== 'boolean' || typeof body?.vlanStatus !== 'boolean') {
     return { error: 'Status koneksi dan VLAN harus berupa true atau false' };
   }
 
-  const serviceList = typeof body?.serviceList === 'string' ? body.serviceList.trim() : '';
-  if (!SERVICE_LIST.includes(serviceList)) {
-    return { error: 'Service List tidak valid' };
+  const serviceRead = readServiceList(body, deviceType);
+  if (serviceRead.error) {
+    return { error: serviceRead.error };
   }
+  const { serviceList } = serviceRead;
   const connectionType = normalizeIpConnectionType(body?.connectionType);
   if (!IP_CONNECTION_TYPES.includes(connectionType)) {
     return { error: 'Connection Type tidak valid' };

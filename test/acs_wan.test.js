@@ -28,6 +28,32 @@ test('nilai dropdown dipetakan ke ConnectionType TR-069', () => {
   assert.equal(CONNECTION_TYPE_TR069.pppoe_routed, 'PPPoE_Routed');
 });
 
+test('edit Fiberhome: nama koneksi di serviceList dipaksa INTERNET dan Name tidak ditulis', () => {
+  const parsed = parseWanPpp(pppBody({
+    deviceType: 'Fiberhome',
+    wanPath: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.',
+    connectionName: '2_INTERNET_R_VID_2033',
+    serviceList: '2_INTERNET_R_VID_2033',
+    connectionType: 'pppoe_routed',
+  }));
+  assert.equal(parsed.error, undefined);
+  assert.equal(parsed.value.serviceList, 'INTERNET');
+  assert.equal(parsed.value.connectionName, '');
+  const plan = planWanPpp({
+    values: parsed.value,
+    manufacturer: 'FiberHome',
+    pppPath: PPP_PATH,
+    connectionPath: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.',
+    knownLeaves: ['WANPPPConnection.Username', 'WANPPPConnection.X_FH_ServiceList', 'WANPPPConnection.VLANID'],
+    dataModel: 'InternetGatewayDevice',
+  });
+  const rows = batchWanParameters(plan);
+  assert.equal(rows.some((row) => String(row[0]).endsWith('.Name')), false);
+  assert.equal(plan.connectionName.length, 0);
+  const service = rows.find((row) => String(row[0]).endsWith('X_FH_ServiceList'));
+  assert.equal(service[1], 'INTERNET');
+});
+
 test('parseWanPpp menolak isian tanpa device', () => {
   const parsed = parseWanPpp({});
   assert.ok(parsed.error);

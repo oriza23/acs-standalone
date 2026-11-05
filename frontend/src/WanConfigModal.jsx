@@ -129,6 +129,24 @@ function wanText(value) {
   return !value || value === '-' ? '' : String(value)
 }
 
+// Nama otomatis Fiberhome ("2_INTERNET_R_VID_2033") bukan Service List.
+function looksLikeOnuConnectionName(value) {
+  const text = String(value || '').trim()
+  return /^\d+_/.test(text) || /_VID_/i.test(text)
+}
+
+export function canonicalServiceList(value) {
+  const text = wanText(value).trim()
+  if (!text || looksLikeOnuConnectionName(text)) {
+    return 'INTERNET'
+  }
+  const upper = text.toUpperCase()
+  if (WAN_SERVICE_OPTIONS.includes(upper)) {
+    return upper
+  }
+  return text
+}
+
 export function emptyWanPppForm() {
   return {
     ...emptyWanForm(),
@@ -157,7 +175,7 @@ export function wanFormFrom(wan) {
     connectionName: wanText(wan.name),
     enableConnection: wan.status !== 'Disabled',
     natStatus: wan.nat === 'Enabled',
-    serviceList: wanText(wan.service) || 'INTERNET',
+    serviceList: canonicalServiceList(wan.service),
     connectionType: ppp ? uiPppConnectionType(wan.connType) : (wanText(wan.connType) || 'IP_Routed'),
     vlanStatus: wan.vlanId !== '-',
     vlanId: wan.vlanId !== '-' ? String(wan.vlanId) : '',

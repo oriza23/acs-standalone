@@ -531,12 +531,13 @@ const WANS_PROJECTION = [
 const MAX_WANS = 32;
 
 const SERVICE_KEYS = [
+  'X_FH_ServiceList',
+  'X_ZTE-COM_ServiceList',
   'X_CT-COM_ServiceList',
   'X_CMCC_ServiceList',
   'X_CU_ServiceList',
   'X_HW_SERVICELIST',
   'X_BROADCOM_COM_ServiceName',
-  'X_BROADCOM_COM_IfName',
 ];
 
 const BIND_KEYS = [
@@ -707,7 +708,8 @@ function connectionRecord(id, kind, data, parent, fullPath) {
     password: ppp ? maskedSecret(data?.Password?._value) : '-',
     vlanStatus: vlanStatusOf(data, vlanId),
     vlanId: vlanId || '-',
-    service: firstLeaf(data, SERVICE_KEYS) || leafText(data, 'Name') || '-',
+    // Jangan jatuhkan ke Name: Fiberhome menamai koneksi "2_INTERNET_R_VID_2033", itu bukan Service List.
+    service: firstLeaf(data, SERVICE_KEYS) || '-',
     dns: leafText(data, 'DNSServers') || '-',
     connTrigger: leafText(data, 'ConnectionTrigger') || 'AlwaysOn',
     nat: enabledLabel(data?.NATEnabled?._value),
