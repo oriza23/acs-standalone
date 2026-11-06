@@ -11,7 +11,7 @@ const { WanFlowError, addWanPpp, addWanIp } = require('../acs_wan_flow');
 const { parseZteWanRequest, zteBindingString } = require('../acs_zte_wan');
 const {
   LIVE_PROJECTION, HOSTS_PROJECTION, WLANS_PROJECTION, LAN_PROJECTION, WANS_PROJECTION,
-  extractHosts, extractWlans, extractWans, extractLanConfig, ssidCountOf, summarizeDevice,
+  extractHosts, extractWlans, extractWans, allUsedPortsOf, extractLanConfig, ssidCountOf, summarizeDevice,
   wanFirmwareProfile, wanStatusRefreshTargets,
 } = require('../acs_summary');
 
@@ -310,7 +310,16 @@ async function prepareWanStatus({ item, req, serverId, deviceId, reload }) {
 
 deviceDetailRoute('/devices/wans', {
   projection: WANS_PROJECTION,
-  build: (item) => ({ wans: extractWans(item), ssidCount: ssidCountOf(item) }),
+  build: (item) => {
+    const wans = extractWans(item);
+    const allUsedPorts = allUsedPortsOf(wans);
+    return {
+      wans,
+      allUsedPorts,
+      all_used_ports: allUsedPorts,
+      ssidCount: ssidCountOf(item),
+    };
+  },
   label: 'WAN',
   prepare: prepareWanStatus,
 });

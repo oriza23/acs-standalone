@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Cable, Eye, EyeOff, KeyRound, Network, X } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { fireError, fireSuccess } from './swals.js'
+import { boundPortKeys } from './PortBinding.jsx'
 
 function errorMessage(error, fallback) {
   return error?.response?.data?.message || fallback
@@ -168,6 +169,18 @@ export function emptyWanIpForm() {
   }
 }
 
+function labelsFromBind(bind) {
+  return orderedPorts(boundPortKeys(bind).map((key) => key.replace(/^lan/i, 'LAN').replace(/^ssid/i, 'SSID')))
+}
+
+export function portsOfWan(wan) {
+  const listed = wan?.boundPorts || wan?.bound_ports
+  if (Array.isArray(listed)) {
+    return orderedPorts(listed)
+  }
+  return labelsFromBind(wan?.portBind)
+}
+
 export function wanFormFrom(wan) {
   const ppp = wan.type === 'PPP' || wan.transport === 'PPPoE'
   return {
@@ -187,7 +200,7 @@ export function wanFormFrom(wan) {
     ipAddress: wanText(wan.ip),
     gateway: wanText(wan.remoteIp),
     dnsServer: wanText(wan.dns),
-    selectedPorts: orderedPorts(wan.boundPorts),
+    selectedPorts: portsOfWan(wan),
   }
 }
 
@@ -302,27 +315,33 @@ function WanBindingStatus({ boundPorts, ssidCount }) {
   )
 }
 
-function WanPortCheckbox({ label, checked, onChange, tone, disabled = false }) {
+function WanPortCheckbox({ label, checked, onChange, tone, locked = false, disabled = false }) {
   const active = tone === 'ppp'
     ? 'border-cyan-500 bg-cyan-50 text-cyan-800 dark:border-cyan-400 dark:bg-cyan-950/50 dark:text-cyan-100'
     : 'border-blue-500 bg-blue-50 text-blue-800 dark:border-blue-400 dark:bg-blue-950/50 dark:text-blue-100'
+  const idle = 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-200 dark:hover:border-slate-500'
   return (
-    <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${checked ? active : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-200 dark:hover:border-slate-500'} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}>
+    <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${locked ? 'cursor-not-allowed border-gray-200 bg-gray-200 text-gray-400 opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-500' : `cursor-pointer ${checked ? active : idle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}`}>
       <input
         type="checkbox"
-        className={`h-4 w-4 shrink-0 cursor-pointer ${tone === 'ppp' ? 'accent-cyan-600' : 'accent-blue-600'}`}
+        className={`h-4 w-4 shrink-0 ${tone === 'ppp' ? 'accent-cyan-600' : 'accent-blue-600'} ${locked || disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
         checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
+        disabled={locked || disabled}
+        onChange={(event) => {
+          if (!locked) {
+            onChange(event.target.checked)
+          }
+        }}
       />
       {label}
     </label>
   )
 }
 
-function WanPortPicker({ selectedPorts, ssidCount, onToggle, tone, disabled = false }) {
+function WanPortPicker({ selectedPorts, ssidCount, onToggle, tone, disabled = false, lockedPorts = [] }) {
   const selected = new Set(orderedPorts(selectedPorts))
-  const wifi = ssidPortsFor(ssidCount, selectedPorts)
+  const locked = new Set(orderedPorts(lockedPorts))
+  const wifi = ssidPortsFor(ssidCount, [...selectedPorts, ...lockedPorts])
   const wifi24 = wifi.filter((port) => Number(port.label.slice(4)) <= 4)
   const wifi5 = wifi.filter((port) => Number(port.label.slice(4)) > 4)
   const grid = (ports) => (
@@ -333,6 +352,7 @@ function WanPortPicker({ selectedPorts, ssidCount, onToggle, tone, disabled = fa
           label={port.label}
           checked={selected.has(port.label)}
           tone={tone}
+          locked={locked.has(port.label)}
           disabled={disabled}
           onChange={(checked) => onToggle(port.label, checked)}
         />
@@ -379,7 +399,7 @@ function WanSavingOverlay() {
 }
 
 export function WanConfigModal({
-  variant, editing = false, manufacturer = '', saving = false, form, ssidCount = 4, onChange, onPatch, onPortChange, onClose, onSave, onAfterSuccess,
+  variant, editing = false, manufacturer = '', saving = false, form, ssidCount = 4, onChange, onPatch, onPortChange, onClose, onSave, onAfterSuccess, lockedPorts = [],
 }) {
   const isPpp = variant === 'ppp'
   const ipRouted = !isPpp && isIpRoutedType(form.connectionType)
@@ -467,16 +487,26 @@ export function WanConfigModal({
     if (!formAlive.current || !outcome || outcome.cancelled) {
       return
     }
-    if (outcome.ok) {
+    if (outcome.ok && !outcome.partial) {
       onClose()
-      void fireSuccess({
-        icon: outcome.partial ? 'warning' : 'success',
-        title: outcome.partial ? 'Sebagian tersimpan' : 'Berhasil',
-        text: outcome.message,
-      }, onAfterSuccess)
+      await fireSuccess({ title: 'Berhasil', text: outcome.message }, onAfterSuccess)
       return
     }
-    fireError({ title: 'Gagal', text: outcome.message || 'Gagal mengirim konfigurasi WAN.' })
+    if (outcome.ok) {
+      await fireSuccess({
+        icon: 'warning',
+        title: 'Sebagian tersimpan',
+        text: outcome.message,
+      }, false)
+      if (formAlive.current) {
+        onClose()
+      }
+      if (typeof onAfterSuccess === 'function') {
+        onAfterSuccess()
+      }
+      return
+    }
+    await fireError({ title: 'Gagal', text: outcome.message || 'Gagal mengirim konfigurasi WAN.' })
   }
 
   const ipField = (field, label) => (
@@ -747,6 +777,7 @@ export function WanConfigModal({
               ssidCount={ssidCount}
               tone={isPpp ? 'ppp' : 'ip'}
               disabled={busy}
+              lockedPorts={lockedPorts}
               onToggle={onPortChange}
             />
           </WanSection>

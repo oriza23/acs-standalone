@@ -30,6 +30,7 @@ import WanConfigModal, {
   emptyWanPppForm,
   isIpRoutedType,
   orderedPorts,
+  portsOfWan,
   resolveDeviceType,
   wanFormFrom,
 } from './WanConfigModal.jsx'
@@ -737,11 +738,13 @@ function wanIpFormFrom(wan) {
 function WanPanel({
   wans, loading, error, onOverlayChange, setWanToDelete, deletingWanPath,
   manufacturer, ssidCount, tr069Ip, onSavePpp, onSaveIp, saving,
-  addWanOpen, addWanIpOpen, onCloseAddWan, onCloseAddWanIp, onAfterWanSuccess,
+  addWanOpen, addWanIpOpen, onCloseAddWan, onCloseAddWanIp, onAfterWanSuccess, allUsedPorts = [],
 }) {
   const [editingWanPath, setEditingWanPath] = useState(null)
   const [editKind, setEditKind] = useState(null)
+  const [ownBoundPorts, setOwnBoundPorts] = useState([])
   const [wanForm, setWanForm] = useState(emptyWanForm)
+  const lockedPorts = orderedPorts(allUsedPorts).filter((label) => !ownBoundPorts.includes(label))
   const hasWans = Array.isArray(wans) && wans.length > 0
   const showPpp = addWanOpen || editKind === 'ppp'
   const showIp = addWanIpOpen || editKind === 'ip'
@@ -754,6 +757,7 @@ function WanPanel({
     if (addWanOpen) {
       setEditKind(null)
       setEditingWanPath(null)
+      setOwnBoundPorts([])
       setWanForm(emptyWanPppForm())
     }
   }, [addWanOpen])
@@ -762,6 +766,7 @@ function WanPanel({
     if (addWanIpOpen) {
       setEditKind(null)
       setEditingWanPath(null)
+      setOwnBoundPorts([])
       setWanForm(emptyWanIpForm())
     }
   }, [addWanIpOpen])
@@ -777,6 +782,9 @@ function WanPanel({
   }
 
   function updateWanPort(label, checked) {
+    if (lockedPorts.includes(label)) {
+      return
+    }
     setWanForm((current) => {
       const currentPorts = Array.isArray(current.selectedPorts) ? current.selectedPorts : []
       const next = checked
@@ -792,6 +800,7 @@ function WanPanel({
     }
     setEditKind(null)
     setEditingWanPath(null)
+    setOwnBoundPorts([])
     setWanForm(emptyWanForm())
     onCloseAddWan()
     onCloseAddWanIp()
@@ -799,8 +808,10 @@ function WanPanel({
 
   function openEditWan(wan) {
     const ppp = wan.type === 'PPP' || wan.transport === 'PPPoE'
+    const form = wanFormFrom(wan)
     setEditingWanPath(wan.fullPath || null)
-    setWanForm(wanFormFrom(wan))
+    setOwnBoundPorts(portsOfWan(wan))
+    setWanForm(form)
     setEditKind(ppp ? 'ppp' : 'ip')
     onCloseAddWan()
     onCloseAddWanIp()
@@ -909,6 +920,7 @@ function WanPanel({
           onClose={closeWanModal}
           onSave={handleIpSubmit}
           onAfterSuccess={onAfterWanSuccess}
+          lockedPorts={lockedPorts}
         />
       )}
       {showPpp && (
@@ -925,6 +937,7 @@ function WanPanel({
           onClose={closeWanModal}
           onSave={handlePppSubmit}
           onAfterSuccess={onAfterWanSuccess}
+          lockedPorts={lockedPorts}
         />
       )}
     </div>
@@ -1433,6 +1446,7 @@ function DeviceDetailModal({
                   onCloseAddWan={() => setAddWanOpen(false)}
                   onCloseAddWanIp={() => setAddWanIpOpen(false)}
                   onAfterWanSuccess={onAfterWanSuccess}
+                  allUsedPorts={device?.allUsedPorts || device?.all_used_ports || []}
                 />
               ) : (
                 <p className="m-0 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -1744,7 +1758,10 @@ function GenieAcs() {
         }
         const wans = Array.isArray(result?.wans) ? result.wans : []
         const ssidCount = Number(result?.ssidCount) || 0
-        setSelectedDevice((current) => (current && current.id === selectedDeviceId ? { ...current, wans, ssidCount } : current))
+        const allUsedPorts = Array.isArray(result?.allUsedPorts)
+          ? result.allUsedPorts
+          : (Array.isArray(result?.all_used_ports) ? result.all_used_ports : [])
+        setSelectedDevice((current) => (current && current.id === selectedDeviceId ? { ...current, wans, ssidCount, allUsedPorts } : current))
         setWansState({ loading: false, error: '' })
       } catch (requestError) {
         if (controller.signal.aborted) {
@@ -2065,7 +2082,7 @@ function GenieAcs() {
         deviceType,
         // Fiberhome: nama opsional saat membuat (kosong = ONT menamai sendiri); saat edit tidak dikirim.
         connectionName: deviceType === 'Fiberhome' && editingPath ? '' : form.connectionName,
-        ports: orderedPorts(form.selectedPorts),
+        ports: orderedPorts(Array.isArray(form.selectedPorts) ? form.selectedPorts : []),
       })
       return { ok: true, partial: Boolean(result.partial), message: result.message }
     } catch (requestError) {
@@ -2109,7 +2126,7 @@ function GenieAcs() {
         subnetMask: staticIp ? form.subnetMask : '',
         gateway: staticIp ? form.gateway : '',
         dnsServer: staticIp ? form.dnsServer : '',
-        ports: orderedPorts(form.ports ?? form.selectedPorts),
+        ports: orderedPorts(Array.isArray(form.selectedPorts) ? form.selectedPorts : (Array.isArray(form.ports) ? form.ports : [])),
       })
       return { ok: true, partial: Boolean(result.partial), message: result.message }
     } catch (requestError) {

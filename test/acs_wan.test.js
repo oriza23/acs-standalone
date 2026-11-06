@@ -254,6 +254,33 @@ test('Fiberhome PPP: port binding ke X_FH_LanInterface (daftar path dipisah koma
   assert.equal(valueOf(ct, 'X_FH_LanInterface'), undefined);
 });
 
+test('Edit Fiberhome: uncheck sebagian menulis ulang string; uncheck semua tidak mengirim ""', () => {
+  const lan = (index) => `InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.${index}`;
+  const both = planFh({
+    wanPath: PPP_PATH,
+    connectionType: 'pppoe_routed',
+    ports: ['LAN1', 'LAN2'],
+  }, FH_FULL);
+  assert.equal(valueOf(both, 'X_FH_LanInterface'), `${lan(1)},${lan(2)}`);
+  const onlyLan2 = planFh({
+    wanPath: PPP_PATH,
+    connectionType: 'pppoe_routed',
+    ports: ['LAN2'],
+  }, FH_FULL);
+  assert.equal(valueOf(onlyLan2, 'X_FH_LanInterface'), lan(2));
+  assert.equal(onlyLan2.bindClearSkipped, false);
+  const cleared = planFh({
+    wanPath: PPP_PATH,
+    connectionType: 'pppoe_routed',
+    ports: [],
+  }, FH_FULL);
+  assert.equal(valueOf(cleared, 'X_FH_LanInterface'), undefined);
+  assert.equal(cleared.bindClearSkipped, true);
+  const created = planFh({ connectionType: 'pppoe_routed', ports: [] }, FH_FULL);
+  assert.equal(valueOf(created, 'X_FH_LanInterface'), undefined);
+  assert.equal(created.bindClearSkipped, false);
+});
+
 test('Fiberhome PPP: Connection Name opsional; bila diisi dikirim sebagai task terpisah', () => {
   const auto = planFh({ connectionType: 'pppoe_routed', connectionName: 'Otomatis' }, FH_SPARSE);
   assert.deepEqual(auto.connectionName, []);

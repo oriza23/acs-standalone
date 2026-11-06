@@ -471,7 +471,7 @@ test('extractLanConfig: cadangan TR-181 dan projection LAN terpisah dari daftar 
   assert.ok(!LIVE_PROJECTION.includes('LANHostConfigManagement'));
 });
 
-const { extractWans, WANS_PROJECTION, ssidCountOf } = require('../backend/acs_summary');
+const { extractWans, allUsedPortsOf, WANS_PROJECTION, ssidCountOf } = require('../backend/acs_summary');
 
 test('extractWans: TR-098 PPP dan IP, VLAN vendor, sandi disamarkan', () => {
   const item = {
@@ -542,6 +542,8 @@ test('extractWans: TR-098 PPP dan IP, VLAN vendor, sandi disamarkan', () => {
     connType: 'IP_Routed',
     uptime: '3660',
     portBind: '',
+    boundPorts: [],
+    bound_ports: [],
   });
   assert.equal(wans[1].type, 'IP');
   assert.equal(wans[1].id, '1.1.ip.2');
@@ -651,7 +653,11 @@ test('extractWans: port binding ZTE dan Huawei dibaca, jumlah SSID dari NumberOf
   };
   const wans = extractWans(item);
   assert.equal(wans[0].portBind, 'LAN1,SSID1,WAN_PPP_1');
+  assert.deepEqual(wans[0].boundPorts, ['LAN1', 'SSID1']);
+  assert.deepEqual(wans[0].bound_ports, ['LAN1', 'SSID1']);
   assert.equal(wans[1].portBind, 'LAN2,SSID5');
+  assert.deepEqual(wans[1].boundPorts, ['LAN2', 'SSID5']);
+  assert.deepEqual(allUsedPortsOf(wans), ['LAN1', 'LAN2', 'SSID1', 'SSID5']);
   assert.equal(ssidCountOf(item), 8);
   assert.equal(ssidCountOf({
     InternetGatewayDevice: {
@@ -674,6 +680,7 @@ test('extractWans Fiberhome: Service List dari X_FH_ServiceList, nama koneksi ti
                   ConnectionType: 'IP_Routed',
                   Username: 'budi@net',
                   'X_FH_ServiceList': 'INTERNET',
+                  'X_FH_LanInterface': 'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1,InternetGatewayDevice.LANDevice.1.WLANConfiguration.1',
                   VLANID: '2033',
                   Enable: true,
                   ConnectionStatus: 'Connected',
@@ -688,6 +695,8 @@ test('extractWans Fiberhome: Service List dari X_FH_ServiceList, nama koneksi ti
   const [wan] = extractWans(item);
   assert.equal(wan.name, '2_INTERNET_R_VID_2033');
   assert.equal(wan.service, 'INTERNET');
+  assert.deepEqual(wan.boundPorts, ['LAN1', 'SSID1']);
+  assert.deepEqual(allUsedPortsOf([wan]), ['LAN1', 'SSID1']);
 });
 
 test('extractWans: data kosong dan projection tidak ikut daftar ONU', () => {

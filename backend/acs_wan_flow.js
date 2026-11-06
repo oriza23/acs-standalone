@@ -376,8 +376,11 @@ async function runWan(cfg, { server, values, username, expectProfile }) {
     const checked = verificationNotes(verification);
 
     const summary = summarizeRisky(result.risky, plan);
-    const partial = summary.partial || checked.partial;
-    const notes = [...summary.notes, ...checked.notes];
+    const bindNote = plan.bindClearSkipped
+      ? 'Fiberhome mengabaikan pengosongan port binding (X_FH_LanInterface tidak menerima string kosong). Sisakan minimal satu port, atau hapus koneksi WAN bila semua port harus dilepas.'
+      : '';
+    const partial = summary.partial || checked.partial || Boolean(bindNote);
+    const notes = [...summary.notes, ...checked.notes, ...(bindNote ? [bindNote] : [])];
     console.log(`[ACS ${cfg.label}] ${username || '-'} ${server.host}:${server.port} ${deviceId} ${plan.profile} ${wanPath} ${plan.fields.join(', ')} (diterapkan, ${result.atomic ? 'atomik' : 'terpisah'}) waktu[${timer.summary()}]`);
     return {
       wanPath,
