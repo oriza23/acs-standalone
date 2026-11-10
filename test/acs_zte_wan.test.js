@@ -116,3 +116,41 @@ test('penjaga merek: ONU non-ZTE ditolak 409 sebelum AddObject apa pun', async (
     acs.createWanPppInstance = saved.create;
   }
 });
+
+test('Service Control ZTE tidak lagi disisipkan ke batch WAN PPP (diterapkan lewat ACL terpisah)', () => {
+  const off = byLeaf(planFor(pppoeInput()).rows);
+  assert.equal(Object.hasOwn(off, 'X_ZTE-COM_ServiceControl'), false);
+  const on = byLeaf(planFor(pppoeInput({ enableServiceControl: true })).rows);
+  assert.equal(Object.hasOwn(on, 'X_ZTE-COM_ServiceControl'), false);
+  assert.match(parseZteWanRequest(pppoeInput({ enableServiceControl: 'ya' })).error, /enableServiceControl/);
+});
+
+test('Service Control lewat /wan-ppp: diabaikan untuk non-ZTE', () => {
+  const base = {
+    deviceId: 'ONT', connectionName: 'X', enableConnection: true, natStatus: true, vlanStatus: false,
+    connectionType: 'ip-routed', serviceList: 'INTERNET', ports: [], username: 'u', password: 'p', enableServiceControl: true,
+  };
+  const zte = parseWanPpp({ ...base, deviceType: 'ZTE' });
+  assert.equal(zte.value.enableServiceControl, true);
+  assert.equal(zte.value.writeServiceControl, true);
+  const huawei = parseWanPpp({ ...base, deviceType: 'Huawei' });
+  assert.equal(huawei.value.enableServiceControl, false);
+  assert.equal(huawei.value.writeServiceControl, false);
+  assert.match(parseWanPpp({ ...base, deviceType: 'ZTE', enableServiceControl: 1 }).error, /enableServiceControl/);
+});
+
+test('Service Control ZTE edit: writeServiceControl bila routed; bridge tidak menulis', () => {
+  const editBase = {
+    deviceId: 'ONT', connectionName: 'PPPoE', enableConnection: true, natStatus: true, vlanStatus: false,
+    connectionType: 'ip-routed', serviceList: 'INTERNET', ports: [], username: 'u', password: 'p',
+    deviceType: 'ZTE', wanPath: PPP,
+  };
+  const off = parseWanPpp({ ...editBase, enableServiceControl: false });
+  assert.equal(off.value.writeServiceControl, true);
+  assert.equal(off.value.enableServiceControl, false);
+
+  const bridge = parseWanPpp({
+    ...editBase, connectionType: 'pppoe_bridged', enableServiceControl: true, username: '', password: '',
+  });
+  assert.equal(bridge.value.writeServiceControl, false);
+});

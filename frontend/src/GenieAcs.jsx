@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Eye, EyeOff, Flag, Globe, Network, Pencil, Server, Trash2, TriangleAlert, X } from 'lucide-react'
+import {
+  Activity,
+  Clock,
+  Eye,
+  EyeOff,
+  Flag,
+  Globe,
+  Network,
+  Pencil,
+  Server,
+  Thermometer,
+  Trash2,
+  TriangleAlert,
+  X,
+} from 'lucide-react'
 import Swal from 'sweetalert2'
 import { fireError, fireSuccess } from './swals.js'
 import {
@@ -1147,13 +1161,75 @@ function DetailRow({ label, children }) {
   )
 }
 
-function DetailIndicator({ label, children }) {
+function DeviceMetricCard({ title, icon: Icon, iconClassName, children }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
-      <p className="m-0 text-xs font-bold tracking-widest text-gray-500 uppercase dark:text-gray-400">{label}</p>
-      <div className="mt-2 text-lg font-bold text-gray-900 dark:text-gray-100">{children}</div>
+    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="mb-1 text-xs font-bold tracking-wider text-gray-500 uppercase dark:text-gray-400">{title}</p>
+          {children}
+        </div>
+        <Icon className={`h-8 w-8 shrink-0 ${iconClassName}`} strokeWidth={2} aria-hidden />
+      </div>
     </div>
   )
+}
+
+function renderMetricRx(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return <p className="m-0 text-2xl font-extrabold text-gray-800 dark:text-gray-100">-</p>
+  }
+  const rx = Number(value)
+  let label = 'Buruk'
+  let warnaDot = 'bg-red-500'
+  if (rx >= -20) {
+    label = 'Bagus'
+    warnaDot = 'bg-green-500'
+  } else if (rx >= -25) {
+    label = 'Sedang'
+    warnaDot = 'bg-yellow-500'
+  }
+  const abnormal = rx > RX_NORMAL_MAX || rx < RX_NORMAL_MIN
+  return (
+    <>
+      <p
+        className="m-0 text-2xl font-extrabold text-gray-800 dark:text-gray-100"
+        title={abnormal ? `Di luar rentang wajar fiber (${RX_NORMAL_MIN} s/d ${RX_NORMAL_MAX} dBm)` : undefined}
+      >
+        {rx.toFixed(2)}
+        {abnormal && '*'}
+        <span className="ml-1 text-base font-bold text-gray-500 dark:text-gray-400">dBm</span>
+      </p>
+      <div className="mt-1.5 flex items-center gap-1.5 text-sm font-medium text-gray-600 dark:text-gray-300">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${warnaDot}`} aria-hidden />
+        <span>{label}</span>
+      </div>
+    </>
+  )
+}
+
+function renderMetricTemp(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return <p className="m-0 text-2xl font-extrabold text-gray-800 dark:text-gray-100">-</p>
+  }
+  const temp = Number(value)
+  const hot = temp > 50
+  const valueClass = hot
+    ? 'text-orange-600 dark:text-orange-400'
+    : 'text-emerald-600 dark:text-emerald-400'
+  return (
+    <p className={`m-0 text-2xl font-extrabold ${valueClass}`}>
+      {temp.toFixed(1)}
+      <span className="ml-0.5 text-lg font-bold opacity-90">°C</span>
+    </p>
+  )
+}
+
+function metricTempIconClass(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return 'text-gray-400 dark:text-gray-500'
+  }
+  return Number(value) > 50 ? 'text-orange-500 dark:text-orange-400' : 'text-emerald-500 dark:text-emerald-400'
 }
 
 // Modal detail satu ONU. Data diambil dari baris yang diklik (sudah bersih dari backend).
@@ -1219,10 +1295,20 @@ function DeviceDetailModal({
         </div>
 
         <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto p-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <DetailIndicator label="REDAMAN ONU">{renderRx(device.rx_onu)}</DetailIndicator>
-            <DetailIndicator label="TEMPERATURE">{renderTemp(device.temp)}</DetailIndicator>
-            <DetailIndicator label="UPTIME">{formatUptime(device.uptime)}</DetailIndicator>
+          <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <DeviceMetricCard title="Redaman ONU" icon={Activity} iconClassName="text-indigo-500 dark:text-indigo-400">
+              {renderMetricRx(device.rx_onu)}
+            </DeviceMetricCard>
+            <DeviceMetricCard
+              title="Temperature"
+              icon={Thermometer}
+              iconClassName={metricTempIconClass(device.temp)}
+            >
+              {renderMetricTemp(device.temp)}
+            </DeviceMetricCard>
+            <DeviceMetricCard title="Uptime" icon={Clock} iconClassName="text-violet-500 dark:text-violet-400">
+              <p className="m-0 text-2xl font-extrabold text-gray-800 dark:text-gray-100">{formatUptime(device.uptime)}</p>
+            </DeviceMetricCard>
           </div>
 
           <div className="grid grid-cols-1 gap-x-8 gap-y-2 md:grid-cols-3">

@@ -2,6 +2,7 @@
 // Seluruh ekstraksi path TR-069 dan konversi satuan dilakukan di sini, bukan di frontend.
 
 const { normalizeWanStatus, resolveWanStatus, detectLegacyWanFirmware } = require('./acs_wan_status');
+const { extractZteAclServiceControl } = require('./acs_zte_service_control');
 
 // ---- Projection NBI ---------------------------------------------------------
 // Hanya path yang dipakai ringkasan di bawah (balasan tetap kecil). Projection NBI tidak
@@ -521,6 +522,7 @@ const WANS_PROJECTION = [
   `${IGD}.WANDevice.2.WANConnectionDevice`,
   `${IGD}.LANDevice.1.WLANConfigurationNumberOfEntries`,
   `${IGD}.LANDevice.1.WLANConfiguration`,
+  `${IGD}.X_ZTE-COM_Security`,
   'Device.WiFi.SSIDNumberOfEntries',
   'Device.WiFi.SSID',
   'Device.PPP.Interface',
@@ -976,9 +978,12 @@ function extractWans(item) {
   if (!isNode(item)) {
     return [];
   }
+  const serviceControl = extractZteAclServiceControl(item);
   const tr098 = wansTr098(item.InternetGatewayDevice);
   const wans = tr098.length > 0 ? tr098 : wansTr181(item.Device);
-  return wans.slice(0, MAX_WANS);
+  return wans
+    .slice(0, MAX_WANS)
+    .map((wan) => ({ ...wan, serviceControl }));
 }
 
 module.exports = {
@@ -991,6 +996,7 @@ module.exports = {
   extractHosts,
   extractWlans,
   extractWans,
+  extractZteAclServiceControl,
   allUsedPortsOf,
   wanFirmwareProfile,
   wanStatusRefreshTargets,

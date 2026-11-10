@@ -103,6 +103,22 @@ export function isIpRoutedType(connectionType) {
   return connectionType === 'IP_Routed'
 }
 
+function isBridgedWanConnection(connectionType) {
+  const compact = String(connectionType || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  return compact === 'pppoebridged' || compact === 'ipbridged'
+}
+
+// Service Control ZTE hanya untuk koneksi routed (PPPoE/IP), bukan bridge.
+export function zteServiceControlVisible({ deviceType, isPpp, connectionType }) {
+  if (deviceType !== 'ZTE') {
+    return false
+  }
+  if (isPpp) {
+    return !isBridgedWanConnection(connectionType)
+  }
+  return isIpRoutedType(connectionType)
+}
+
 export function emptyWanForm() {
   return {
     deviceType: '',
@@ -123,6 +139,8 @@ export function emptyWanForm() {
     gateway: '',
     dnsServer: '',
     selectedPorts: [],
+    // Khusus ZTE (form Add WAN PPP). Dikirim ke backend sebagai boolean enableServiceControl.
+    enableServiceControl: false,
   }
 }
 
@@ -201,6 +219,7 @@ export function wanFormFrom(wan) {
     gateway: wanText(wan.remoteIp),
     dnsServer: wanText(wan.dns),
     selectedPorts: portsOfWan(wan),
+    enableServiceControl: wan.serviceControl === 'Enabled',
   }
 }
 
@@ -420,6 +439,8 @@ export function WanConfigModal({
   const nameOptional = deviceType === 'Fiberhome'
   const autoName = nameOptional && editing
   const busy = isLoading || saving
+  const showZteServiceControl = zteServiceControlVisible({ deviceType, isPpp, connectionType: form.connectionType })
+  const [enableServiceControl, setEnableServiceControl] = useState(() => Boolean(form.enableServiceControl))
 
   useEffect(() => {
     formAlive.current = true
@@ -427,6 +448,21 @@ export function WanConfigModal({
       formAlive.current = false
     }
   }, [])
+
+  // Sinkronkan state checkbox dari data WAN/backend saat modal Edit atau form di-reset.
+  useEffect(() => {
+    setEnableServiceControl(Boolean(form.enableServiceControl))
+  }, [editing, form.enableServiceControl, form.connectionType, deviceType])
+
+  useEffect(() => {
+    if (showZteServiceControl) {
+      return
+    }
+    if (enableServiceControl) {
+      setEnableServiceControl(false)
+      onChange('enableServiceControl', false)
+    }
+  }, [showZteServiceControl, enableServiceControl, onChange])
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -636,7 +672,7 @@ export function WanConfigModal({
                   onPatch({
                     connectionType: value,
                     natStatus: !bridgedPpp,
-                    ...(bridgedPpp ? { username: '', password: '' } : {}),
+                    ...(bridgedPpp ? { username: '', password: '', enableServiceControl: false } : {}),
                   })
                   return
                 }
@@ -650,6 +686,7 @@ export function WanConfigModal({
                     subnetMask: '',
                     gateway: '',
                     dnsServer: '',
+                    enableServiceControl: false,
                   }),
                 })
               }}
@@ -721,6 +758,28 @@ export function WanConfigModal({
               />
             )}
           </div>
+
+          {showZteServiceControl && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 select-none dark:border-slate-600 dark:bg-slate-900/40">
+              <input
+                type="checkbox"
+                className={`mt-0.5 h-4 w-4 shrink-0 cursor-pointer ${accentClass}`}
+                checked={enableServiceControl}
+                disabled={busy}
+                onChange={(event) => {
+                  const next = event.target.checked
+                  setEnableServiceControl(next)
+                  onChange('enableServiceControl', next)
+                }}
+              />
+              <span className="grid gap-0.5">
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-100">Aktifkan Service Control</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Khusus ZTE. Mengirim parameter Service Control TR-069 bersama konfigurasi WAN ini.
+                </span>
+              </span>
+            </label>
+          )}
 
           {isPpp && pppShowsAuth(form.connectionType) && (
             <WanSection icon={KeyRound} title="PPPoE Authentication" iconClass={iconClass}>

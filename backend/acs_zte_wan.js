@@ -58,7 +58,7 @@ function optionalBoolean(value, fallback, field) {
 
 // Body request:
 //   { server_id, deviceId, type: 'pppoe' | 'bridge', name, username?, password?,
-//     vlanId?, priority?, serviceList?, enable?, nat?, ports? }
+//     vlanId?, priority?, serviceList?, enable?, nat?, enableServiceControl?, ports? }
 // Mengembalikan { error } atau { type, labels, body } (body = input parseWanPpp dengan deviceType zte).
 // Validasi mendalam (panjang, rentang VLAN, karakter kontrol) tetap dilakukan parseWanPpp.
 function parseZteWanRequest(input) {
@@ -77,6 +77,11 @@ function parseZteWanRequest(input) {
   if (nat.error) {
     return { error: nat.error };
   }
+  const serviceControl = optionalBoolean(source.enableServiceControl, false, 'enableServiceControl');
+  if (serviceControl.error) {
+    return { error: serviceControl.error };
+  }
+
   const ports = normalizePortLabels(source.ports);
   if (ports.error) {
     return { error: ports.error };
@@ -91,6 +96,8 @@ function parseZteWanRequest(input) {
     enableConnection: enable.value,
     // ONU menolak NAT pada bridge (CWMP 9003); alur inti juga memaksanya false.
     natStatus: pppoe ? nat.value : false,
+    // Placeholder TR-069 ada di acs_wan.js (ZTE_SERVICE_CONTROL_LEAF).
+    enableServiceControl: serviceControl.value,
     vlanStatus: hasVlan,
     ...(hasVlan ? { vlanId: source.vlanId } : {}),
     priority: source.priority ?? 0,

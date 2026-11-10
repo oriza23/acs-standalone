@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Swal from 'sweetalert2'
-import { Menu } from 'lucide-react'
+import { Menu, Network, Shield } from 'lucide-react'
 import { clearSession, getUsername } from './api/auth.js'
 import ThemeToggle from './ThemeToggle.jsx'
 
 const navLinkClass = ({ isActive }) =>
   [
-    'flex h-11 w-full items-center justify-between rounded-xl px-3.5 text-left text-[15px] font-semibold text-sky-100 no-underline transition-colors duration-300',
+    'flex h-11 w-full items-center justify-between gap-3 rounded-xl px-3.5 text-left text-[15px] font-semibold text-sky-100 no-underline transition-colors duration-300',
     isActive ? 'bg-white/15 text-white shadow-[inset_3px_0_0_#67e8f9]' : 'hover:bg-white/10 hover:text-white',
   ].join(' ')
+
+function SidebarNavLink({ to, label, icon: Icon }) {
+  return (
+    <NavLink to={to} className={navLinkClass}>
+      <span className="flex min-w-0 items-center gap-2.5">
+        {Icon ? <Icon size={18} strokeWidth={2.1} className="shrink-0 text-sky-200/90" aria-hidden="true" /> : null}
+        <span className="truncate">{label}</span>
+      </span>
+    </NavLink>
+  )
+}
 
 function pageLabel(pathname) {
   if (pathname.startsWith('/akun')) {
@@ -83,12 +94,8 @@ function AppShell() {
         </div>
 
         <nav className="grid flex-1 content-start gap-1.5 overflow-x-hidden overflow-y-auto pr-1 custom-sidebar-scrollbar" aria-label="Menu utama">
-          <NavLink to="/acs" className={navLinkClass}>
-            GenieACS
-          </NavLink>
-          <NavLink to="/akun" className={navLinkClass}>
-            Akun Admin
-          </NavLink>
+          <SidebarNavLink to="/acs" label="GenieACS" icon={Network} />
+          <SidebarNavLink to="/akun" label="Akun Admin" icon={Shield} />
         </nav>
 
         <ThemeToggle />

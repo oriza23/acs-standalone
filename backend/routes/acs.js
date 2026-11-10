@@ -313,8 +313,11 @@ deviceDetailRoute('/devices/wans', {
   build: (item) => {
     const wans = extractWans(item);
     const allUsedPorts = allUsedPortsOf(wans);
+    const zteAclServiceControl = wans[0]?.serviceControl || '-';
     return {
       wans,
+      zteAclServiceControl,
+      zte_acl_service_control: zteAclServiceControl,
       allUsedPorts,
       all_used_ports: allUsedPorts,
       ssidCount: ssidCountOf(item),
@@ -496,7 +499,8 @@ async function handleAddWan(req, res, parse, run, fallbackMessage, { body = req.
 }
 
 // Buat atau ubah koneksi WAN PPP. Body = isian form (nama, NAT, service, connection type,
-// VLAN, 802.1p, username, password, MTU, port binding) + server_id + deviceId.
+// VLAN, 802.1p, username, password, MTU, port binding, enableServiceControl khusus ZTE routed) + server_id + deviceId.
+// wanPath terisi = edit (SetParameterValues, termasuk Service Control true/false bila dikirim).
 // wanPath kosong membuat instance baru (AddObject) lalu setParameterValues (Queue-and-Fire, acs_wan_flow.js).
 // Hanya admin. Sandi tidak dicatat di log.
 router.post('/wan-ppp', requireAdmin, (req, res) => handleAddWan(req, res, parseWanPpp, addWanPpp, 'Gagal mengirim koneksi WAN PPP'));
@@ -505,10 +509,11 @@ router.post('/wan-ppp', requireAdmin, (req, res) => handleAddWan(req, res, parse
 //   1. AddObject ...WANConnectionDevice.            (instance baru ditangkap dari response / selisih pohon)
 //   2. AddObject ...WANConnectionDevice.[N].WANPPPConnection.
 //   3. SetParameterValues atomik (Enable terakhir): ConnectionType, Name, Username/Password, NAT,
-//      X_ZTE-COM_ServiceList, X_ZTE-COM_VLANEnable/VLANID/8021P, X_ZTE-COM_LanInterface
+//      X_ZTE-COM_ServiceList, X_ZTE-COM_VLANEnable/VLANID/8021P, X_ZTE-COM_LanInterface.
+//      enableServiceControl: SetParameterValues terpisah ke X_ZTE-COM_Security (AclServices) setelah WAN sukses.
 //   Gagal di langkah 2/3 -> instance baru di-rollback (DeleteObject) dan error dikembalikan ke klien.
 // Body: { server_id, deviceId, type: 'pppoe'|'bridge', name, username?, password?, vlanId?, priority?,
-//         serviceList?, enable?, nat?, ports?: ['LAN1','SSID1'] }
+//         serviceList?, enable?, nat?, enableServiceControl?: boolean, ports?: ['LAN1','SSID1'] }
 // Respons: 400 input tidak valid | 404 perangkat tidak ada | 409 bukan ZTE / diblokir guard |
 //          502 ONU atau GenieACS menolak (rollbackNote menjelaskan nasib instance) | 500 lainnya.
 router.post('/zte/wan', requireAdmin, (req, res) => {

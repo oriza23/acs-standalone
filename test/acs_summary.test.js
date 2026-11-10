@@ -471,7 +471,7 @@ test('extractLanConfig: cadangan TR-181 dan projection LAN terpisah dari daftar 
   assert.ok(!LIVE_PROJECTION.includes('LANHostConfigManagement'));
 });
 
-const { extractWans, allUsedPortsOf, WANS_PROJECTION, ssidCountOf } = require('../backend/acs_summary');
+const { extractWans, extractZteAclServiceControl, allUsedPortsOf, WANS_PROJECTION, ssidCountOf } = require('../backend/acs_summary');
 
 test('extractWans: TR-098 PPP dan IP, VLAN vendor, sandi disamarkan', () => {
   const item = {
@@ -541,6 +541,7 @@ test('extractWans: TR-098 PPP dan IP, VLAN vendor, sandi disamarkan', () => {
     mac: 'AA:BB:CC:DD:EE:FF',
     connType: 'IP_Routed',
     uptime: '3660',
+    serviceControl: '-',
     portBind: '',
     boundPorts: [],
     bound_ports: [],

@@ -321,6 +321,15 @@ function parseWanPpp(body) {
 
   const manufacturer = typeof body?.manufacturer === 'string' ? body.manufacturer.trim().slice(0, 200) : '';
 
+  const serviceControl = readZteServiceControl(body, {
+    deviceType,
+    connectionType,
+    wanPath: wanPath || null,
+  });
+  if (serviceControl.error) {
+    return { error: serviceControl.error };
+  }
+
   return {
     value: {
       deviceId,
@@ -328,6 +337,8 @@ function parseWanPpp(body) {
       connectionName,
       enableConnection: body.enableConnection,
       natStatus: body.natStatus,
+      enableServiceControl: serviceControl.enableServiceControl,
+      writeServiceControl: serviceControl.writeServiceControl,
       serviceList,
       connectionType,
       vlanStatus: body.vlanStatus,
@@ -360,6 +371,24 @@ function normalizeConnectionType(value) {
 function isBridgedConnection(connectionType) {
   const compact = String(connectionType || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   return compact === 'pppoebridged' || compact === 'ipbridged';
+}
+
+function readZteServiceControl(body, { deviceType, connectionType, wanPath }) {
+  if (body?.enableServiceControl !== undefined && body?.enableServiceControl !== null && typeof body.enableServiceControl !== 'boolean') {
+    return { error: 'enableServiceControl harus berupa true atau false' };
+  }
+  const zte = deviceType === 'zte' || deviceType === '';
+  const bridged = isBridgedConnection(connectionType);
+  if (!zte || bridged) {
+    return { enableServiceControl: false, writeServiceControl: false };
+  }
+  const enabled = body?.enableServiceControl === true;
+  const isEdit = Boolean(wanPath);
+  return {
+    enableServiceControl: enabled,
+    // Buat: hanya tulis TR-069 bila true. Edit: tulis true atau false sesuai checkbox.
+    writeServiceControl: isEdit ? typeof body?.enableServiceControl === 'boolean' : enabled === true,
+  };
 }
 
 function omitBridgeAuth(parameterValues, connectionType) {
@@ -603,6 +632,15 @@ function parseWanIp(body) {
   const manufacturer = typeof body?.manufacturer === 'string' ? body.manufacturer.trim().slice(0, 200) : '';
   const modelName = typeof body?.modelName === 'string' ? body.modelName.trim().slice(0, 200) : '';
 
+  const serviceControl = readZteServiceControl(body, {
+    deviceType,
+    connectionType,
+    wanPath: wanPath || null,
+  });
+  if (serviceControl.error) {
+    return { error: serviceControl.error };
+  }
+
   return {
     value: {
       deviceId,
@@ -610,6 +648,8 @@ function parseWanIp(body) {
       connectionName,
       enableConnection: body.enableConnection,
       natStatus: !bridged,
+      enableServiceControl: serviceControl.enableServiceControl,
+      writeServiceControl: serviceControl.writeServiceControl,
       serviceList,
       connectionType,
       vlanStatus: body.vlanStatus,
